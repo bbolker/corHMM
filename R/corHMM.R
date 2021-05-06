@@ -6,8 +6,8 @@
 ######################################################################################################################################
 ######################################################################################################################################
 
-corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.states = "marginal", fixed.nodes=FALSE, p=NULL, root.p="yang", ip=NULL, nstarts=0, n.cores=1, get.tip.states = FALSE, lewis.asc.bias = FALSE, lower.bound = 1e-9, upper.bound = 100, return.devfun=FALSE){
-    
+corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.states = "marginal", fixed.nodes=FALSE, p=NULL, root.p="yang", ip=NULL, nstarts=0, n.cores=1, get.tip.states = FALSE, lewis.asc.bias = FALSE, lower.bound = 1e-9, upper.bound = 100, return.devfun=FALSE) {
+
     # Checks to make sure node.states is not NULL.  If it is, just returns a diagnostic message asking for value.
     if(is.null(node.states)){
         obj <- NULL
@@ -27,34 +27,34 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
             cat("No model selected for \'node.states\'. Will perform marginal ancestral state estimation.\n")
         }
     }
-    
+
     if(fixed.nodes == FALSE){
         if(!is.null(phy$node.label)){
             phy$node.label <- NULL
             cat("You specified \'fixed.nodes=FALSE\' but included a phy object with node labels. These node labels have been removed.\n")
         }
     }
-    
+
     #Ensures that weird root state probabilities that do not sum to 1 are input:
     if(!is.null(root.p)){
         if(!is.character(root.p)){
             root.p <- root.p/sum(root.p)
         }
     }
-    
+
     input.data <- data
-    
+
     nCol <- dim(data)[2]
-    
+
     CorData <- corProcessData(data, collapse = is.null(rate.mat))
     data.legend <- data <- CorData$corData
     nObs <- length(CorData$ObservedTraits)
-    
+
     # Checks to make sure phy & data have same taxa. Fixes conflicts (see match.tree.data function).
     matching <- match.tree.data(phy,data)
     data <- matching$data
     phy <- matching$phy
-    
+
     # Will not perform reconstructions on invariant characters (unless rate params have been given!)
     if(nlevels(as.factor(data[,1])) <= 1 & !is.null(p)){
         obj <- NULL
@@ -71,19 +71,19 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
             return(obj)
         }
     }
-    
+
     #Creates the data structure and orders the rows to match the tree.
     phy$edge.length[phy$edge.length<=1e-5] <- 1e-5
     data.sort <- data.frame(data[,2], data[,2],row.names=data[,1])
     data.sort <- data.sort[phy$tip.label,]
-    
+
     counts <- table(data.sort[,1])
     levels <- levels(as.factor(data.sort[,1]))
     cols <- as.factor(data.sort[,1])
     cat("State distribution in data:\n")
     cat("States:",levels,"\n",sep="\t")
     cat("Counts:",counts,"\n",sep="\t")
-    
+
     #Some initial values for use later
     k=2
     if(upper.bound < lower.bound){
@@ -92,7 +92,7 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
     lb <- log(lower.bound)
     ub <- log(upper.bound)
     order.test <- TRUE
-    
+
     obj <- NULL
     nb.tip <- length(phy$tip.label)
     nb.node <- phy$Nnode
@@ -100,10 +100,10 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
     root.p <- root.p
     nstarts <- nstarts
     ip <- ip
-    
+
     model.set.final <- rate.cat.set.corHMM.JDB(phy=phy,data=input.data,rate.cat=rate.cat,ntraits=nObs,model=model,rate.mat=rate.mat)
     phy <- reorder(phy, "pruningwise")
-    
+
     # this allows for custom rate matricies!
     if(!is.null(rate.mat)){
         order.test <- FALSE
@@ -123,20 +123,20 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
         }
         ###############################
     }
-    
+
     lower = rep(lb, model.set.final$np)
     upper = rep(ub, model.set.final$np)
-    
-    
+
+
     opts <- list("algorithm"="NLOPT_LN_SBPLX", "maxeval"="1000000", "ftol_rel"=.Machine$double.eps^0.5)
     if(!is.null(p)){
         cat("Calculating likelihood from a set of fixed parameters", "\n")
         out<-NULL
         est.pars<-log(p)
-        out$objective<-dev.corhmm(est.pars,phy=phy,liks=model.set.final$liks,Q=model.set.final$Q,rate=model.set.final$rate,root.p=root.p, rate.cat = rate.cat, order.test = order.test, lewis.asc.bias = lewis.asc.bias)
+        out$objective <- dev.corhmm(est.pars,phy=phy,liks=model.set.final$liks,Q=model.set.final$Q,rate=model.set.final$rate,root.p=root.p, rate.cat = rate.cat, order.test = order.test, lewis.asc.bias = lewis.asc.bias)
         loglik <- -out$objective
         est.pars <- exp(est.pars)
-    }else{
+    } else {
         if(is.null(ip)){
             #If a user-specified starting value(s) is not supplied this begins loop through a set of randomly chosen starting values:
             #Sets parameter settings for random restarts by taking the parsimony score and dividing
@@ -191,7 +191,7 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
             est.pars <- exp(out$solution)
         }
     }
-    
+
     #Starts the ancestral state reconstructions:
     if(node.states != "none") {
         cat("Finished. Inferring ancestral states using", node.states, "reconstruction.","\n")
@@ -214,20 +214,38 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
         phy$node.label <- NA
         tip.states <- NA
     }
-    
+
     # finalize the output
     solution <- matrix(est.pars[model.set.final$index.matrix], dim(model.set.final$index.matrix))
     StateNames <- paste("(", rep(1:(dim(model.set.final$index.matrix)[1]/rate.cat), rate.cat), ",", rep(paste("R", 1:rate.cat, sep = ""), each = nObs), ")", sep = "")
     rownames(solution) <- colnames(solution) <- StateNames
     AIC <- -2*loglik+2*model.set.final$np
     AICc <- -2*loglik+(2*model.set.final$np*(nb.tip/(nb.tip-model.set.final$np-1)))
-    
+
     if (is.character(node.states)) {
         if (node.states == "marginal" || node.states == "scaled"){
             colnames(lik.anc$lik.anc.states) <- StateNames
         }
     }
-    
+
+  if (!return.devfun) {
+    fun <- NA
+  } else {
+    fun <- function(...) {
+      L <- list(...)
+      for (n in names(L)) {
+        assign(n,L[[n]])
+      }
+      dev.corhmm(p, phy,liks, Q, rate, root.p, rate.cat, order.test,
+                 lewis.asc.bias)
+    }
+    environment(fun) <- list2env(
+        list(p=log(est.pars), phy=phy,liks=model.set.final$liks,
+        Q=model.set.final$Q,rate=model.set.final$rate,
+        root.p=root.p, rate.cat = rate.cat,
+        order.test = order.test, lewis.asc.bias = lewis.asc.bias))
+  }
+
     obj = list(loglik = loglik,
     AIC = AIC,
     AICc = AICc,
@@ -241,7 +259,8 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
     tip.states=tip.states,
     states.info = lik.anc$info.anc.states,
     iterations=out$iterations,
-    root.p=root.p)
+    root.p=root.p,
+    devfun=fun)
     class(obj)<-"corhmm"
     return(obj)
 }
@@ -254,7 +273,7 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
 ######################################################################################################################################
 
 dev.corhmm <- function(p,phy,liks,Q,rate,root.p,rate.cat,order.test,lewis.asc.bias) {
-  
+
   p = exp(p)
   cp_root.p <- root.p
   nb.tip <- length(phy$tip.label)
@@ -265,7 +284,7 @@ dev.corhmm <- function(p,phy,liks,Q,rate,root.p,rate.cat,order.test,lewis.asc.bi
   anc <- unique(phy$edge[,1])
   k.rates <- dim(Q)[2] / 2
   if (any(is.nan(p)) || any(is.infinite(p))) return(1000000)
-  
+
   Q[] <- c(p, 0)[rate]
   diag(Q) <- -rowSums(Q)
   # # if the q matrix has columns not estimated, remove them
@@ -278,7 +297,7 @@ dev.corhmm <- function(p,phy,liks,Q,rate,root.p,rate.cat,order.test,lewis.asc.bi
       return(1000000)
     }
   }
-  
+
   if(order.test == TRUE){
       # ensure that the rate classes have mean rates in a consistent order (A > B > C > n)
       StateOrderMat <- matrix(1, (dim(Q)/rate.cat)[1], (dim(Q)/rate.cat)[2])
@@ -295,7 +314,7 @@ dev.corhmm <- function(p,phy,liks,Q,rate,root.p,rate.cat,order.test,lewis.asc.bi
           return(1000000)
       }
   }
-  
+
   for (i in seq(from = 1, length.out = nb.node)) {
       #the ancestral node at row i is called focal
       focal <- anc[i]
@@ -307,7 +326,7 @@ dev.corhmm <- function(p,phy,liks,Q,rate,root.p,rate.cat,order.test,lewis.asc.bi
       for (desIndex in sequence(length(desRows))){
           v <- v*expm(Q * phy$edge.length[desRows[desIndex]], method=c("Ward77")) %*% liks[desNodes[desIndex],]
       }
-      
+
       ##Allows for fixed nodes based on user input tree.
       if(!is.null(phy$node.label)){
           if(!is.na(phy$node.label[focal - nb.tip])){
@@ -317,13 +336,13 @@ dev.corhmm <- function(p,phy,liks,Q,rate,root.p,rate.cat,order.test,lewis.asc.bi
               v <- v * fixer
           }
       }
-      
+
       #Sum the likelihoods:
       comp[focal] <- sum(v)
       #Divide each likelihood by the sum to obtain probabilities:
       liks[focal, ] <- v/comp[focal]
   }
-  
+
   #Specifies the root:
   root <- nb.tip + 1L
   #If any of the logs have NAs restart search:
@@ -390,7 +409,7 @@ getLewisLikelihood <- function(p, phy, liks, Q, rate, root.p, rate.cat){
   states_structure <- seq(from = 1, by = nStates, length.out = rate.cat)
   dummy.liks.vec <- vector("numeric", nStates)
   for(state_i in 1:nStates){
-    lik_structure_i <- states_structure + (state_i - 1) 
+    lik_structure_i <- states_structure + (state_i - 1)
     liks[] <- 0
     liks[1:nTips, lik_structure_i] <- 1
     dummy.liks.vec[state_i] <- -dev.corhmm(p = p, phy = phy, liks = liks, Q = Q, rate = rate, root.p = root.p, rate.cat = rate.cat, order.test = FALSE, lewis.asc.bias = FALSE)
@@ -400,7 +419,7 @@ getLewisLikelihood <- function(p, phy, liks, Q, rate, root.p, rate.cat){
 
 # JDB modified functions
 rate.cat.set.corHMM.JDB<-function(phy,data,rate.cat, ntraits, model, rate.mat=NULL){
-    
+
     obj <- NULL
     nb.tip <- length(phy$tip.label)
     nb.node <- phy$Nnode
@@ -422,14 +441,14 @@ rate.cat.set.corHMM.JDB<-function(phy,data,rate.cat, ntraits, model, rate.mat=NU
     rate[rate == 0] <- NA
     index.matrix<-rate
     rate[is.na(rate)]<-max(rate,na.rm=TRUE)+1
-    
+
     CorData <- corProcessData(data, collapse = is.null(rate.mat))
     data <- CorData$corData
     nObs <- length(CorData$ObservedTraits)
-    
+
     matching <- match.tree.data(phy,data)
     data <- matching$data
-    
+
     # this is no longer needed since corProcessData will produce a dataset of a specific type every time
     # x <- as.numeric(data.sort[,1])
     # TIPS <- 1:nb.tip
@@ -440,22 +459,22 @@ rate.cat.set.corHMM.JDB<-function(phy,data,rate.cat, ntraits, model, rate.mat=NU
     # for(i in 1:nb.tip){
     #     if(is.na(x[i])){x[i]=2}
     # }
-    
+
     tmp <- matrix(0, nb.tip + nb.node, ntraits)
     for(i in 1:nb.tip){
         state_index <- as.numeric(unlist(strsplit(as.character(data[i,2]), "&")))
         tmp[i, state_index] <- 1
     }
     liks <- matrix(rep(tmp, rate.cat), nb.tip + nb.node, ntraits*rate.cat)
-    
+
     Q <- matrix(0, dim(rate)[1], dim(rate)[1])
-    
+
     obj$np<-max(rate)-1
     obj$rate<-rate
     obj$index.matrix<-index.matrix
     obj$liks<-liks
     obj$Q<-Q
-    
+
     return(obj)
 }
 
@@ -497,25 +516,25 @@ corProcessData <- function(data, collapse=TRUE){
 }
 
 print.corhmm<-function(x,...){
-    
+
     ntips=Ntip(x$phy)
     output<-data.frame(x$loglik,x$AIC,x$AICc,x$rate.cat,ntips, row.names="")
     names(output)<-c("-lnL","AIC","AICc","Rate.cat","ntax")
     cat("\nFit\n")
     print(output)
     cat("\n")
-    
+
     UserStates <- corProcessData(x$data)$ObservedTraits
     names(UserStates) <- sort(unique(x$data.legend[,2]))
     cat("Legend\n")
     print(UserStates)
     cat("\n")
-    
+
     param.est<- x$solution
     cat("Rates\n")
     print(param.est)
     cat("\n")
-    
+
     if(any(x$eigval<0)){
         index.matrix <- x$index.mat
         #If any eigenvalue is less than 0 then the solution is not the maximum likelihood solution
@@ -547,7 +566,7 @@ dev.corhmm.ORIGINAL <- function(p,phy,liks,Q,rate,root.p,rate.cat,order.test) {
     anc <- unique(phy$edge[,1])
     k.rates <- dim(Q)[2] / 2
     if (any(is.nan(p)) || any(is.infinite(p))) return(1000000)
-    
+
     Q[] <- c(p, 0)[rate]
     diag(Q) <- -rowSums(Q)
     for (i  in seq(from = 1, length.out = nb.node)) {
