@@ -1,5 +1,7 @@
 ---
 title: "extending corHMM to get profile confidence intervals, Bayesian credible intervals, etc."
+date: "`r format(Sys.time(),'%d %b %Y')`"
+author: Ben Bolker
 bibliography: corHMM.bib
 ---
 
@@ -170,7 +172,7 @@ Here the solid horizontal/vertical lines are the prior means, the dashed lines s
 ```{r bayes.ci}
 bayes.ci <- t(apply(m1,2,quantile,c(0.025,0.975)))
 ```
-```{r all.ci}
+```{r all.ci,echo=FALSE}
 all.ci <- setNames(
     as.data.frame(rbind(wald.ci,prof.ci,bayes.ci)),
     c("lwr","upr"))
@@ -202,9 +204,11 @@ of (ancestrally reconstructed/imputed) traits that are observable in the extant 
 
 - LE: read this document and the [corHMM vignette](https://cran.r-project.org/web/packages/corHMM/vignettes/corHMMv2.1-vignette.pdf). (Don't worry too much about the "multiple rate categories" issue for now ...)
 - (? maybe ?) compare and contrast these results to those derived by model comparison methods in @pagel_bayesian_2006 
-- illustrate/implement how to put a constraint on gain vs loss rates
+- illustrate/implement how to put a constraint on gain vs loss rates. What's up with gain/loss identifiability in the examples? The authors don't seem to be concerned about this/it doesn't seem to be an issue ... why not?
 - figure out how to apply `corHMM` to our (3-binary-trait) example with appropriate constraints
 - Write/explain more about the contrast between a model-centric and a parameter-centric approach to these analyses (and PCM generally ...)
 - ??? implement `dev.corhmm` in [Template Model Builder](https://kaskr.github.io/adcomp/Introduction.html) ??? (This would enable much faster estimation and Bayesian analyses)
+- Think more about priors. What is actually a reasonable range? The current values are guessed at from the range set in `corHMM`. Too broad a range breaks `MCMCmetrop1R`, when we go to too extreme a rate value and get numeric errors.  How would we evaluate prior predictive simulations to figure out whether parameters give rise to evolutionary rates/scenarios we would consider unrealistic??
+
 
 ## References
