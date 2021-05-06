@@ -5,8 +5,9 @@ bibliography: corHMM.bib
 
 ```{r pkgs,message=FALSE}
 if (packageVersion("corHMM")<"2.6.1") {
-  stop("need hacked version of corHMM. Try 'remotes::install_github(\"bbolker/corHMM\")'")
+  stop("need hacked version of corHMM. Try 'remotes::install_github(\"bbolker/corHMM\", build_vignettes=TRUE)'")
 }
+## if installation fails when building vignettes drop build_vignettes=TRUE (default is FALSE)
 library(corHMM)
 library(bbmle)     ## for likelihood profiles/CIs
 library(numDeriv)  ## for Hessian/Wald CIs
@@ -18,6 +19,9 @@ library(colorspace)
 library(GGally)
 ```
 
+I made a *small* change in `corHMM` that has it return a list of the auxiliary variables it sets up
+to compute the log-likelihood of any particular set of (log) evolutionary rates. This makes it much
+more convenient to do the extra stuff we want to do here (likelihood profiles, Bayesian analysis, etc.)
 Run the basic example from `corHMM` [@corHMM]:
 
 ```{r ex1,cache=TRUE}
@@ -189,5 +193,18 @@ and averaging differently over the uncertainty in the other priors (we could tea
 this apart if we worked a bit harder). All three CIs agree fairly well for rates 3 and 4.
 For rates 1 and 2, the upper confidence limits for the profile are much higher, but these
 are brought back most of the way by the Bayesian priors.
+
+Additional reading on methods behind `corHMM` (optional!): @beaulieu_identifying_2013, @beaulieu_hidden_2014. (These
+papers may focus more on identifying *hidden* or *latent* sources of variability than just looking at the effects
+of (ancestrally reconstructed/imputed) traits that are observable in the extant (tip) taxa ...)
+
+## To do
+
+- LE: read this document and the [corHMM vignette](https://cran.r-project.org/web/packages/corHMM/vignettes/corHMMv2.1-vignette.pdf). (Don't worry too much about the "multiple rate categories" issue for now ...)
+- (? maybe ?) compare and contrast these results to those derived by model comparison methods in @pagel_bayesian_2006 
+- illustrate/implement how to put a constraint on gain vs loss rates
+- figure out how to apply `corHMM` to our (3-binary-trait) example with appropriate constraints
+- Write/explain more about the contrast between a model-centric and a parameter-centric approach to these analyses (and PCM generally ...)
+- ??? implement `dev.corhmm` in [Template Model Builder](https://kaskr.github.io/adcomp/Introduction.html) ??? (This would enable much faster estimation and Bayesian analyses)
 
 ## References
