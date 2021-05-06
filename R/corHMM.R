@@ -6,7 +6,7 @@
 ######################################################################################################################################
 ######################################################################################################################################
 
-corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.states = "marginal", fixed.nodes=FALSE, p=NULL, root.p="yang", ip=NULL, nstarts=0, n.cores=1, get.tip.states = FALSE, lewis.asc.bias = FALSE, lower.bound = 1e-9, upper.bound = 100, return.devfun=FALSE) {
+corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.states = "marginal", fixed.nodes=FALSE, p=NULL, root.p="yang", ip=NULL, nstarts=0, n.cores=1, get.tip.states = FALSE, lewis.asc.bias = FALSE, lower.bound = 1e-9, upper.bound = 100) {
 
     # Checks to make sure node.states is not NULL.  If it is, just returns a diagnostic message asking for value.
     if(is.null(node.states)){
@@ -167,7 +167,7 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
                     starts<-rexp(model.set.final$np, 1/mean.change)
                 }
                 starts[starts < exp(lb)] = exp(lb)
-                starts[starts > exp(ub)] = exp(lb)
+                starts[starts > exp(ub)] = exp(ub)
                 out = nloptr(x0=log(starts), eval_f=dev.corhmm, lb=lower, ub=upper, opts=opts, phy=phy, liks=model.set.final$liks,Q=model.set.final$Q,rate=model.set.final$rate,root.p=root.p, rate.cat = rate.cat, order.test = order.test, lewis.asc.bias = lewis.asc.bias)
                 tmp[,1] = out$objective
                 tmp[,2:(model.set.final$np+1)] = out$solution
@@ -191,6 +191,11 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
             est.pars <- exp(out$solution)
         }
     }
+
+    args.list <- list(phy=phy,liks=model.set.final$liks,
+        Q=model.set.final$Q,rate=model.set.final$rate,
+        root.p=root.p, rate.cat = rate.cat,
+        order.test = order.test, lewis.asc.bias = lewis.asc.bias)
 
     #Starts the ancestral state reconstructions:
     if(node.states != "none") {
@@ -228,23 +233,8 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
         }
     }
 
-  if (!return.devfun) {
-    fun <- NA
-  } else {
-    fun <- function(...) {
-      L <- list(...)
-      for (n in names(L)) {
-        assign(n,L[[n]])
-      }
-      dev.corhmm(p, phy,liks, Q, rate, root.p, rate.cat, order.test,
-                 lewis.asc.bias)
-    }
-    environment(fun) <- list2env(
-        list(p=log(est.pars), phy=phy,liks=model.set.final$liks,
-        Q=model.set.final$Q,rate=model.set.final$rate,
-        root.p=root.p, rate.cat = rate.cat,
-        order.test = order.test, lewis.asc.bias = lewis.asc.bias))
-  }
+
+    args.list <- c(list(p=log(est.pars)), args.list)
 
     obj = list(loglik = loglik,
     AIC = AIC,
@@ -260,7 +250,7 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
     states.info = lik.anc$info.anc.states,
     iterations=out$iterations,
     root.p=root.p,
-    devfun=fun)
+    args.list=args.list)
     class(obj)<-"corhmm"
     return(obj)
 }
