@@ -6,7 +6,7 @@
 ######################################################################################################################################
 ######################################################################################################################################
 
-corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.states = "marginal", fixed.nodes=FALSE, p=NULL, root.p="yang", ip=NULL, nstarts=0, n.cores=1, get.tip.states = FALSE, lewis.asc.bias = FALSE, lower.bound = 1e-9, upper.bound = 100){
+corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.states = "marginal", fixed.nodes=FALSE, p=NULL, root.p="yang", ip=NULL, nstarts=0, n.cores=1, get.tip.states = FALSE, lewis.asc.bias = FALSE, lower.bound = 1e-9, upper.bound = 100, return.devfun=FALSE){
     
     # Checks to make sure node.states is not NULL.  If it is, just returns a diagnostic message asking for value.
     if(is.null(node.states)){
