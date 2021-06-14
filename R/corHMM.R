@@ -519,7 +519,9 @@ print.corhmm<-function(x,...){
     cat("\n")
 
     UserStates <- corProcessData(x$data)$ObservedTraits
-    names(UserStates) <- sort(unique(x$data.legend[,2]))
+    ss <- sort(unique(x$data.legend[,2]))
+    ss <- ss[!grepl("&", ss)]  ## drop ambiguous states
+    names(UserStates) <- ss
     cat("Legend\n")
     print(UserStates)
     cat("\n")
