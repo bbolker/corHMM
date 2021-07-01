@@ -9,6 +9,8 @@
 corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.states = "marginal", fixed.nodes=FALSE, p=NULL, root.p="yang", ip=NULL, nstarts=0, n.cores=1, get.tip.states = FALSE, lewis.asc.bias = FALSE,
                    collapse=TRUE, lower.bound = 1e-9, upper.bound = 100) {
 
+    call <- match.call()
+
     # Checks to make sure node.states is not NULL.  If it is, just returns a diagnostic message asking for value.
     if(is.null(node.states)){
         obj <- NULL
@@ -252,10 +254,12 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
     states.info = lik.anc$info.anc.states,
     iterations=out$iterations,
     root.p=root.p,
-    args.list=args.list)
+    args.list=args.list,
+    call = call)
     class(obj)<-"corhmm"
     return(obj)
 }
+
 
 
 ######################################################################################################################################
@@ -309,6 +313,7 @@ dev.corhmm <- function(p,phy,liks,Q,rate,root.p,rate.cat,order.test,lewis.asc.bi
       }
   }
 
+  ## FIXME: can we do this part in TMB/Rcpp?
   for (i in seq(from = 1, length.out = nb.node)) {
       #the ancestral node at row i is called focal
       focal <- anc[i]
