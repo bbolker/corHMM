@@ -1,5 +1,5 @@
 Package: corHMM
-Version: 2.7.1.2
+Version: 2.7.1.3
 Title: Hidden Markov Models of Character Evolution
 Authors@R: c(person("Jeremy", "Beaulieu", role=c("aut", "cre"),
                      email = "jmbeauli@uark.edu"),
