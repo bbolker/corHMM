@@ -7,7 +7,7 @@
 ######################################################################################################################################
 
 corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.states = "marginal", fixed.nodes=FALSE, p=NULL, root.p="yang", ip=NULL, nstarts=0, n.cores=1, get.tip.states = FALSE, lewis.asc.bias = FALSE,
-                   collapse=TRUE, lower.bound = 1e-9, upper.bound = 100) {
+                   collapse=TRUE, lower.bound = 1e-9, upper.bound = 100, opts=NULL) {
 
     call <- match.call()
 
@@ -51,7 +51,14 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
 
     CorData <- corProcessData(data, collapse = collapse)
     data.legend <- data <- CorData$corData
-    nObs <- length(CorData$ObservedTraits)
+
+    if(length(grep("&", CorData$corData[,2])) > 0){
+      non_and_chars <- as.numeric(CorData$corData[,2][-grep("&", CorData$corData[,2])])
+      and_chars <- as.numeric(unlist(strsplit(CorData$corData[,2][grep("&", CorData$corData[,2])], "&")))
+      nObs <- max(c(non_and_chars, and_chars))
+    }else{
+      nObs <- max(as.numeric(CorData$corData[,2]))
+    }
 
     # Checks to make sure phy & data have same taxa. Fixes conflicts (see match.tree.data function).
     matching <- match.tree.data(phy,data)
@@ -75,8 +82,12 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
         }
     }
 
+    if(any(phy$edge.length<=1e-5)){
+      warning("Branch lengths of 0 detected. Adding 1e-5 to these branches.", immediate. = TRUE)
+      phy$edge.length[phy$edge.length<=1e-5] <- 1e-5
+    }
+
     #Creates the data structure and orders the rows to match the tree.
-    phy$edge.length[phy$edge.length<=1e-5] <- 1e-5
     data.sort <- data.frame(data[,2], data[,2],row.names=data[,1])
     data.sort <- data.sort[phy$tip.label,]
 
@@ -131,8 +142,9 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
     lower = rep(lb, model.set.final$np)
     upper = rep(ub, model.set.final$np)
 
-
-    opts <- list("algorithm"="NLOPT_LN_SBPLX", "maxeval"="1000000", "ftol_rel"=.Machine$double.eps^0.5)
+    if(is.null(opts)){
+      opts <- list("algorithm"="NLOPT_LN_SBPLX", "maxeval"="1000000", "ftol_rel"=.Machine$double.eps^0.5)
+    }
     if(!is.null(p)){
         cat("Calculating likelihood from a set of fixed parameters", "\n")
         out<-NULL
@@ -168,7 +180,7 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
                 if(mean.change==0){
                     starts=rep(0.01+exp(lb), model.set.final$np)
                 }else{
-                    starts<-rexp(model.set.final$np, 1/mean.change)
+                    starts<-sort(rexp(model.set.final$np, 1/mean.change), decreasing = TRUE)
                 }
                 starts[starts < exp(lb)] = exp(lb)
                 starts[starts > exp(ub)] = exp(ub)
@@ -177,7 +189,11 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
                 tmp[,2:(model.set.final$np+1)] = out$solution
                 tmp
             }
-            restart.set<-mclapply(1:nstarts, random.restart, mc.cores=n.cores)
+            if(n.cores > 1){
+              restart.set<-mclapply(1:nstarts, random.restart, mc.cores=n.cores)
+            }else{
+              restart.set<-lapply(1:nstarts, random.restart)
+            }
             #Finds the best fit within the restart.set list
             best.fit<-which.min(unlist(lapply(restart.set, function(x) x[1])))
             #Generates an object to store results from restart algorithm:
@@ -237,8 +253,12 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
         }
     }
 
-
     args.list <- c(list(p=log(est.pars)), args.list)
+
+
+    if(loglik == -1e+06){
+      warning("corHMM may have failed to optimize correctly, consider checking inputs and running again.", immediate. = TRUE)
+    }
 
     obj = list(loglik = loglik,
     AIC = AIC,
@@ -509,7 +529,7 @@ corProcessData <- function(data, collapse=TRUE){
   if(collapse){
     corData <- data.frame(sp = data[,1], d = sapply(search.strings, function(x) paste(grep(x, ObservedTraits), collapse="&")))
   }else{
-    corData <- data.frame(sp = data[,1], d = observed.traits_index)
+    corData <- data.frame(sp = data[, 1], d = sapply(search.strings, function(x) paste(grep(x, Traits),collapse = "&")))
   }
   return(list(StateMats = StateMats,  PossibleTraits = Traits, ObservedTraits = ObservedTraits, corData = corData))
 }
@@ -524,9 +544,13 @@ print.corhmm<-function(x,...){
     cat("\n")
 
     UserStates <- corProcessData(x$data)$ObservedTraits
-    ss <- sort(unique(x$data.legend[,2]))
-    ss <- ss[!grepl("&", ss)]  ## drop ambiguous states
-    names(UserStates) <- ss
+
+##    ss <- sort(unique(x$data.legend[,2]))
+##    ss <- ss[!grepl("&", ss)]  ## drop ambiguous states
+##     names(UserStates) <- ss
+
+    names(UserStates) <- sort(unique(as.numeric(x$data.legend[,2])))
+
     cat("Legend\n")
     print(UserStates)
     cat("\n")
@@ -546,6 +570,35 @@ print.corhmm<-function(x,...){
     else{
         cat("Arrived at a reliable solution","\n")
     }
+}
+
+# function for calculating PIR according to gardner and organ (2021)
+getPIR <- function(phy, data, collapse){
+  # calculate the CI score
+  CorData <- corProcessData(data, collapse = collapse)
+  dat <- CorData$corData
+  matching <- match.tree.data(phy,dat)
+  dat <- matching$data
+  phy <- matching$phy
+  data.sort <- data.frame(dat[,2], dat[,2],row.names=dat[,1])
+  data.sort <- data.sort[phy$tip.label,]
+  data.sort <- as.matrix(data.sort)
+  dat.phangorn <- phyDat(data.sort,type="USER", levels=1:max(as.numeric(dat[,2])))
+  phy.tmp <- multi2di(phy)
+  par.score <- parsimony(phy.tmp, dat.phangorn, method="fitch")/2
+  ci.score <- CI(phy.tmp, dat.phangorn)
+
+  # calcualte the NIR
+  state_table <- table(dat[,2])
+  levels <- 1:max(as.numeric(dat[,2]))
+  # if all levels are observed, then we use the min from the observed states, otherwise the min is just 0
+  if(dim(state_table) == length(levels)){
+    nir.score <- (max(state_table) - min(state_table))/length(phy$tip.label)
+  }else{
+    nir.score <- (max(state_table) - 0)/length(phy$tip.label)
+  }
+  pir.score <- ci.score * nir.score
+  return(pir.score)
 }
 
 
