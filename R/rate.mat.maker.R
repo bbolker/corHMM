@@ -273,7 +273,8 @@ dropStateMatPars <- function(StateMat, Pars){
   for(i in Pars){
     StateMat[StateMat==i] <- 0
   }
-  pars <- unique(as.vector(StateMat))[-1]
+  StateMat[StateMat == 0] <- NA
+  pars <- sort(unique(na.omit(as.vector(StateMat))))
   for(i in 1:length(pars)){
     StateMat[StateMat == pars[i]] <- i
   }
@@ -290,25 +291,19 @@ keepStateMatPars <- function(StateMat, Pars){
 }
 
 equateStateMatPars <- function(StateMat, ParsList){
-  if(!class(ParsList) == "list"){
+  if(!inherits(ParsList, what="list")){
     ParsList <- list(ParsList)
   }
-  TestMat <- do.call(rbind, ParsList)
-  RowLow <- apply(TestMat, 1, min)
-  ParsList <- ParsList[match(sort(RowLow), RowLow)]
-  newMat <- StateMat
-  pars <- StateMat[StateMat > 0]
   for(i in 1:length(ParsList)){
-    newMat[StateMat %in% ParsList[[i]]] <- min(ParsList[[i]])
+    max_par_i <- max(StateMat, na.rm = TRUE) + 1
+    StateMat[as.vector(StateMat) %in% ParsList[[i]]] <- max_par_i
   }
-  pars <- newMat[newMat > 0]
-  for(i in 1:length(unique(pars))){
-    if(!i %in% pars){
-      pars[pars == min(pars[pars > i])] <- i
-    }
+  StateMat[StateMat == 0] <- NA
+  pars <- sort(unique(na.omit(as.vector(StateMat))))
+  for(i in 1:length(pars)){
+    StateMat[StateMat == pars[i]] <- i
   }
-  newMat[newMat > 0] <- pars
-  return(newMat)
+  return(StateMat)
 }
 
 updateStateMats <- function(StateMats){
@@ -321,9 +316,14 @@ updateStateMats <- function(StateMats){
 }
 
 getFullMat <- function(StateMats, RateClassMat = NULL){
+  for(i in 1:length(StateMats)){
+    StateMats[[i]][is.na(StateMats[[i]])] <- 0
+  }
   StateMats <- updateStateMats(StateMats)
   if(is.null(RateClassMat)){
     RateClassMat <- getStateMat(length(StateMats))
+  }else{
+    RateClassMat[is.na(RateClassMat)] <- 0
   }
   FullMat <- convert2I(RateClassMat) %x% matrix(0, dim(StateMats[[1]])[1], dim(StateMats[[1]])[2])
   IndMat <- matrix(0, length(StateMats), length(StateMats))
@@ -403,12 +403,17 @@ rate.mat.maker.JDB <-function(rate.cat, hrm=TRUE, ntraits=2, nstates=NULL, model
   return(FullMat)
 }
 
-getStateMat4Dat <- function(data, model = "ARD", dual = FALSE, collapse = TRUE){
+getStateMat4Dat <- function(data, model = "ARD", dual = FALSE, collapse = TRUE, indep = FALSE){
   
   CorData <- corProcessData(data, collapse)
   
   data.legend <- CorData$ObservedTraits
-  nObs <- as.numeric(max(CorData$corData[,2]))
+  if(length(grep("&", CorData$corData[,2])) > 0){
+    nObs <- max(as.numeric(unlist(strsplit(CorData$corData[,2], "&"))))
+  }else{
+    nObs <- max(as.numeric(CorData$corData[,2]))
+  }
+  #nObs <- max(as.numeric(CorData$corData[,2]), na.rm = TRUE)
   nCol <- dim(data)[2]
   
   if(nCol > 2){
@@ -417,11 +422,18 @@ getStateMat4Dat <- function(data, model = "ARD", dual = FALSE, collapse = TRUE){
     CurrentMat <- StateMats[[1]]
     for(i in 2:length(StateMats)){
       # this produces an independent model
-      CurrentMat <- CurrentMat %x% IMats[[i]] + convert2I(CurrentMat) %x% StateMats[[i]]
+      max.k <- max(CurrentMat)
+      next_mat <- StateMats[[i]]
+      next_mat[next_mat > 0] <- next_mat[next_mat > 0] + max.k
+      CurrentMat <- CurrentMat %x% IMats[[i]] + convert2I(CurrentMat) %x% next_mat
       IndepMat <- CurrentMat
       # update it to be a dependent model
       CurrentMat[which(CurrentMat > 0)] <- 1:length(which(CurrentMat > 0))
-      rate.mat <- CurrentMat
+      if(indep){
+        rate.mat <- IndepMat
+      }else{
+        rate.mat <- CurrentMat
+      }
     }
   }else{
     rate.mat <- CorData$StateMats[[1]]
@@ -438,20 +450,22 @@ getStateMat4Dat <- function(data, model = "ARD", dual = FALSE, collapse = TRUE){
     rate.mat <- getStateMat(nObs)
   }
   
-  if(model == "ER"){
-    rate.mat[rate.mat > 0] <- 1
+  if(!indep){
+    if(model == "ER"){
+      rate.mat[rate.mat > 0] <- 1
+    }
+    
+    if(model == "SYM"){
+      rate.mat[upper.tri(rate.mat)][rate.mat[upper.tri(rate.mat)]>0] <- 1:length(rate.mat[upper.tri(rate.mat)][rate.mat[upper.tri(rate.mat)]>0])
+      rate.mat <- t(rate.mat)
+      rate.mat[upper.tri(rate.mat)][rate.mat[upper.tri(rate.mat)]>0] <- 1:length(rate.mat[upper.tri(rate.mat)][rate.mat[upper.tri(rate.mat)]>0])
+    }
+    
+    if(model == "ARD"){
+      rate.mat[rate.mat > 0] <- 1:length(rate.mat[rate.mat > 0])
+    }
   }
-  
-  if(model == "SYM"){
-    rate.mat[upper.tri(rate.mat)][rate.mat[upper.tri(rate.mat)]>0] <- 1:length(rate.mat[upper.tri(rate.mat)][rate.mat[upper.tri(rate.mat)]>0])
-    rate.mat <- t(rate.mat)
-    rate.mat[upper.tri(rate.mat)][rate.mat[upper.tri(rate.mat)]>0] <- 1:length(rate.mat[upper.tri(rate.mat)][rate.mat[upper.tri(rate.mat)]>0])
-  }
-  
-  if(model == "ARD"){
-    rate.mat[rate.mat > 0] <- 1:length(rate.mat[rate.mat > 0])
-  }
-  
+
   colnames(rate.mat) <- rownames(rate.mat) <- paste("(", 1:nObs, ")", sep ="")
   if(collapse){
     legend <- CorData$ObservedTraits

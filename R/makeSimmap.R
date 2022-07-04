@@ -1,9 +1,9 @@
 # exported function for use
-makeSimmap <- function(tree, data, model, rate.cat, root.p="yang", nSim=1, nCores=1, fix.node=NULL, fix.state=NULL, parsimony = FALSE, max.attempt = 1000){
+makeSimmap <- function(tree, data, model, rate.cat, root.p="yang", nSim=1, nCores=1, fix.node=NULL, fix.state=NULL, parsimony = FALSE, max.attempt = 1000, collapse=TRUE){
   model[is.na(model)] <- 0
   diag(model) <- 0
   diag(model) <- -rowSums(model)
-  conditional.lik <- getConditionalNodeLik(tree, data, model, rate.cat, root.p, parsimony = parsimony)
+  conditional.lik <- getConditionalNodeLik(tree, data, model, rate.cat, root.p, parsimony = parsimony, collapse=collapse)
   # if(!is.null(tip.probs)){
   #   for(i in 1:dim(conditional.lik$tip.states)[1]){
   #     nCol <- dim(tip.probs)[2]
@@ -12,32 +12,47 @@ makeSimmap <- function(tree, data, model, rate.cat, root.p="yang", nSim=1, nCore
   #     conditional.lik$tip.states[i, ] <- tmp
   #   }
   # }
-  if((!is.null(fix.node) & is.null(fix.state)) | (is.null(fix.node) & !is.null(fix.state))){
-    stop("Only one of a node to fix or the state to fix was supplied when both are needed.",.call=FALSE)
+  if(length(fix.node) != length(fix.state)){
+    stop("The number of nodes supplied to be fixed does not match the number of states provided.",.call=FALSE)
   }
-  
-  if(!is.null(fix.node) & !is.null(fix.state)){
-    if(dim(model)[1] < fix.state){
-      stop("The state being fixed does not exist in this model. The max number of states is ", dim(model)[1])
+  if(!is.null(fix.state)){
+    if(max(fix.state) > dim(model)[1]){
+      stop("One of the states being fixed does not exist in this model.")
     }
+  }
+  if(!is.null(fix.node) & !is.null(fix.state)){
     # test if we are fixing an external or internal node
-    if(fix.node <= length(tree$tip.label)){
-      conditional.lik$tip.states[fix.node,] <- 0
-      conditional.lik$tip.states[fix.node, fix.state] <- 1
-    }else{
-      fix.internal <- fix.node - length(tree$tip.label)
-      conditional.lik$node.states[fix.internal,] <- 0
-      conditional.lik$node.states[fix.internal, fix.state] <- 1
+    for(i in 1:length(fix.node)){
+      focal.fix.node <- fix.node[i]
+      focal.fix.state <- fix.state[i]
+      if(focal.fix.node <= length(tree$tip.label)){
+        conditional.lik$tip.states[focal.fix.node,] <- 0
+        conditional.lik$tip.states[focal.fix.node, focal.fix.state] <- 1
+      }else{
+        fix.internal <- focal.fix.node - length(tree$tip.label)
+        conditional.lik$node.states[fix.internal,] <- 0
+        conditional.lik$node.states[fix.internal, focal.fix.state] <- 1
+      }
     }
   }
   maps <- simSubstHistory(tree, conditional.lik$tip.states, conditional.lik$node.states, model, nSim, nCores, max.attempt)
   mapped.edge <- lapply(maps, function(x) convertSubHistoryToEdge(tree, x))
   obj <- vector("list", nSim)
+  legend <- getStateMat4Dat(data, collapse = collapse)$legend
+  if(rate.cat > 1){
+    StateNames <- paste("(", rep(legend, rate.cat), ",", rep(paste("R", 1:rate.cat, sep = ""), each = length(legend)), ")", sep = "")
+    names(StateNames) <- 1:length(StateNames)
+  }else{
+    StateNames <- legend
+  }
   for(i in 1:nSim){
     tree.simmap <- tree
     tree.simmap$maps <- maps[[i]]
+    tree.simmap$maps <- lapply(maps[[i]], function(x) correctMapName(x, StateNames))
     tree.simmap$mapped.edge <- mapped.edge[[i]]
+    colnames(tree.simmap$mapped.edge) <- StateNames
     tree.simmap$Q <- model
+    colnames(tree.simmap$Q) <- rownames(tree.simmap$Q) <- StateNames
     attr(tree.simmap, "map.order") <- "right-to-left"
     if (!inherits(tree.simmap, "simmap")) 
       class(tree.simmap) <- c("simmap", setdiff(class(tree.simmap), "simmap"))
@@ -47,6 +62,11 @@ makeSimmap <- function(tree, data, model, rate.cat, root.p="yang", nSim=1, nCore
     class(obj) <- c("multiSimmap", "multiPhylo")
   }
   return(obj)
+}
+
+correctMapName <- function(map_element, state_names){
+  names(map_element) <- state_names[match(as.numeric(names(map_element)), as.numeric(names(state_names)))]
+  return(map_element)
 }
 
 # simulate ancestral states at each internal node
@@ -201,15 +221,15 @@ convertSubHistoryToEdge <- function(phy, map){
 }
 
 # get the conditional likelihoods of particular nodes
-getConditionalNodeLik <- function(tree, data, model, rate.cat, root.p, parsimony=FALSE){
+getConditionalNodeLik <- function(tree, data, model, rate.cat, root.p, parsimony=FALSE, collapse=TRUE){
   phy <- reorder(tree, "pruningwise")
   nb.node <- phy$Nnode
   nb.tip <- length(phy$tip.label)
   # process the data to match the liks table
-  CorData <- corProcessData(data)
+  CorData <- corProcessData(data, collapse=collapse)
   nObs <- length(CorData$ObservedTraits)
   # get the liks table
-  model.set.final <- rate.cat.set.corHMM.JDB(phy=phy,data=data, rate.cat=rate.cat, ntraits = nObs, model = "ER")
+  model.set.final <- rate.cat.set.corHMM.JDB(phy=phy,data=data, rate.cat=rate.cat, ntraits = nObs, model = "ER", collapse=collapse, rate.mat=model)
   if(parsimony==TRUE){
     model <- model/1000
   }
