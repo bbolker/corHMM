@@ -37,7 +37,7 @@ ComputeConfidenceIntervals <- function(corhmm.object, desired.delta = 2, n.point
 		current.lnl <- best.lnl
 		while(current.lnl > best.lnl - 5*desired.delta) {
 			par[par_index] <- par[par_index]*.97
-			current.lnl <- compute_lnlikelihood(par, corhmm.object)
+			current.lnl <- compute_neglnlikelihood(par, corhmm.object)
 			results[nrow(results)+1,] <- c(current.lnl, par)
 			if(verbose & nrow(results)%%100==0) {
 				print(tail(results,100))
@@ -46,7 +46,7 @@ ComputeConfidenceIntervals <- function(corhmm.object, desired.delta = 2, n.point
 		current.lnl <- best.lnl
 		while(current.lnl > best.lnl - 5*desired.delta) {
 			par[par_index] <- par[par_index]*1.03
-			current.lnl <- compute_lnlikelihood(par, corhmm.object)
+			current.lnl <- compute_neglnlikelihood(par, corhmm.object)
 			results[nrow(results)+1,] <- c(current.lnl, par)
 			if(verbose & nrow(results)%%100==0) {
 				print(tail(results,100))
@@ -66,9 +66,9 @@ ComputeConfidenceIntervals <- function(corhmm.object, desired.delta = 2, n.point
 	}
 	new.lnl <- rep(NA, nrow(new.params))
 	if(use.pbapply) {
-		new.lnl <- pbapply::pbapply(new.params, 1, compute_lnlikelihood, corhmm.object, cl=n.cores)
+		new.lnl <- pbapply::pbapply(new.params, 1, compute_neglnlikelihood, corhmm.object, cl=n.cores)
 	} else {
-		new.lnl <- apply(new.params, 1, compute_lnlikelihood, corhmm.object)
+		new.lnl <- apply(new.params, 1, compute_neglnlikelihood, corhmm.object)
 	}
 
 	more_results <- cbind(matrix(new.lnl, ncol=1), new.params)
@@ -145,7 +145,6 @@ print.corhmm_confidence <- function(obj) {
 		}
 	}
 	print(result)
-
 }
 
 
@@ -155,7 +154,7 @@ HessianConfidence <- function(corhmm.object) {
 	corhmm.object$node.states <- "none" #we don't want to waste time on this
 
 	par <- MatrixToPars(corhmm.object)
-	hess <- numDeriv::hessian(compute_lnlikelihood, par, "Richardson", method.args=list(), corhmm.object)
+	hess <- numDeriv::hessian(compute_neglnlikelihood, par, "Richardson", method.args=list(), corhmm.object)
 	fisher_info<-solve(-hess)
 	prop_sigma<-sqrt(diag(fisher_info))
 	return.matrix <- rbind(par-1.96*prop_sigma, par+1.96*prop_sigma)

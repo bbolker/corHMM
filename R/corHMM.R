@@ -6,8 +6,7 @@
 ######################################################################################################################################
 ######################################################################################################################################
 
-corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.states = "marginal", fixed.nodes=FALSE, p=NULL, root.p="yang", ip=NULL, nstarts=0, n.cores=1, get.tip.states = FALSE, lewis.asc.bias = FALSE,
-                   collapse=TRUE, lower.bound = 1e-9, upper.bound = 100, opts=NULL) {
+corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.states = "marginal", fixed.nodes=FALSE, p=NULL, root.p="yang", ip=NULL, nstarts=0, n.cores=1, get.tip.states = FALSE, lewis.asc.bias = FALSE, collapse=TRUE, lower.bound = 1e-9, upper.bound = 100, opts=NULL) {
 
     call <- match.call()
 
@@ -52,6 +51,7 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
     CorData <- corProcessData(data, collapse = collapse)
     data.legend <- data <- CorData$corData
 
+    # nObs <- length(CorData$ObservedTraits)
     if(length(grep("&", CorData$corData[,2])) > 0){
       non_and_chars <- as.numeric(CorData$corData[,2][-grep("&", CorData$corData[,2])])
       and_chars <- as.numeric(unlist(strsplit(CorData$corData[,2][grep("&", CorData$corData[,2])], "&")))
@@ -142,9 +142,11 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
     lower = rep(lb, model.set.final$np)
     upper = rep(ub, model.set.final$np)
 
+
     if(is.null(opts)){
       opts <- list("algorithm"="NLOPT_LN_SBPLX", "maxeval"="1000000", "ftol_rel"=.Machine$double.eps^0.5)
     }
+
     if(!is.null(p)){
         cat("Calculating likelihood from a set of fixed parameters", "\n")
         out<-NULL
@@ -254,7 +256,6 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
     }
 
     args.list <- c(list(p=log(est.pars)), args.list)
-
 
     if(loglik == -1e+06){
       warning("corHMM may have failed to optimize correctly, consider checking inputs and running again.", immediate. = TRUE)
@@ -396,14 +397,15 @@ dev.corhmm <- function(p,phy,liks,Q,rate,root.p,rate.cat,order.test,lewis.asc.bi
           root.p = liks[root,] / sum(liks[root,])
           loglik <- -(sum(log(comp[-TIPS])) + log(sum(exp(log(root.p)+log(liks[root,])))))
       }
-  }
-  # root.p!==NULL will fix root probabilities based on user supplied vector:
-  if(is.numeric(root.p[1])){
+  }else{
+    if(is.numeric(root.p[1])){
       loglik <- -(sum(log(comp[-TIPS])) + log(sum(exp(log(root.p)+log(liks[root,])))))
       if(is.infinite(loglik)){
-          return(1000000)
+        return(1000000)
       }
+    }
   }
+  # root.p!==NULL will fix root probabilities based on user supplied vector:
   if(lewis.asc.bias == TRUE){
     p <- log(p)
     dummy.liks.vec <- getLewisLikelihood(p = p, phy = phy, liks = liks, Q = Q, rate = rate, root.p = cp_root.p, rate.cat = rate.cat)
@@ -545,11 +547,17 @@ print.corhmm<-function(x,...){
 
     UserStates <- corProcessData(x$data)$ObservedTraits
 
+
 ##    ss <- sort(unique(x$data.legend[,2]))
 ##    ss <- ss[!grepl("&", ss)]  ## drop ambiguous states
 ##     names(UserStates) <- ss
 
     names(UserStates) <- sort(unique(as.numeric(x$data.legend[,2])))
+    if(length(grep("&", x$data.legend[,2])) > 0){
+      names(UserStates) <- sort(unique(as.numeric(unlist(strsplit(x$data.legend[,2], "&")))))
+    }else{
+      names(UserStates) <- sort(unique(as.numeric(x$data.legend[,2])))
+    }
 
     cat("Legend\n")
     print(UserStates)

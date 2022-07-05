@@ -276,7 +276,8 @@ dropStateMatPars <- function(StateMat, Pars) {
     StateMat[StateMat==i] <- 0
   }
   StateMat[StateMat == 0] <- NA
-  pars <- unique(na.omit(as.vector(StateMat)))
+
+  pars <- sort(unique(na.omit(as.vector(StateMat))))
   for(i in seq_along(pars)) {
     StateMat[StateMat == pars[i]] <- i
   }
@@ -293,9 +294,10 @@ keepStateMatPars <- function(StateMat, Pars){
 }
 
 equateStateMatPars <- function(StateMat, ParsList){
+
   ## empty/trivial ParsList (NULL or empty list), return original matrix
   if (length(ParsList) == 0) return(StateMat)
-  if(!class(ParsList) == "list"){
+  if(!inherits(ParsList, what="list")){
     ParsList <- list(ParsList)
   }
   for(i in seq_along(ParsList)){
@@ -303,7 +305,8 @@ equateStateMatPars <- function(StateMat, ParsList){
     StateMat[as.vector(StateMat) %in% ParsList[[i]]] <- max_par_i
   }
   StateMat[StateMat == 0] <- NA
-  pars <- unique(na.omit(as.vector(StateMat)))
+
+  pars <- sort(unique(na.omit(as.vector(StateMat))))
   for(i in seq_along(pars)){
     StateMat[StateMat == pars[i]] <- i
   }
