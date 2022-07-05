@@ -22,8 +22,7 @@ test_that("Equal rates, no nodes fixed",{
 
     corHMM.new <- corHMM(phy, data[,c(1,2)], model="ER", rate.cat=1, fixed.nodes=FALSE, p=0.01080903)
     corHMM.brute <- corHMM:::GetMarginalBrute(phy=phy, data=data, p=c(0.01080903,0.01080903), root.p="yang", n.states=2, node.fixed=NULL, state.fixed=2)
-    comparison <- identical(sum(round(corHMM.brute - corHMM.new$states, 5)), 0)
-    expect_true(comparison)
+    expect_equal(corHMM.brute, unname(as.matrix(corHMM.new$states)))
 })
 
 
