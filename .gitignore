@@ -5,3 +5,5 @@ inst/doc
 .#*
 *_cache/
 *_files/
+.DS_Store
+

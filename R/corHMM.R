@@ -6,7 +6,7 @@
 ######################################################################################################################################
 ######################################################################################################################################
 
-corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.states = "marginal", fixed.nodes=FALSE, p=NULL, root.p="yang", ip=NULL, nstarts=0, n.cores=1, get.tip.states = FALSE, lewis.asc.bias = FALSE, collapse=TRUE, lower.bound = 1e-9, upper.bound = 100, opts=NULL) {
+corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.states = "marginal", fixed.nodes=FALSE, p=NULL, root.p="yang", tip.fog=NULL, ip=NULL, fog.ip = 0.01, ip=NULL, nstarts=0, n.cores=1, get.tip.states = FALSE, lewis.asc.bias = FALSE, collapse=TRUE, lower.bound = 1e-9, upper.bound = 100, opts=NULL) {
 
     call <- match.call()
 
@@ -37,6 +37,12 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
         }
     }
 
+
+    if(!inherits(data, "data.frame")){
+      data <- as.data.frame(data)
+      message("Input data is required to be of class 'data.frame' - converting now.")
+    }
+  
     #Ensures that weird root state probabilities that do not sum to 1 are input:
     if(!is.null(root.p)){
         if(!is.character(root.p)){
@@ -81,10 +87,10 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
             return(obj)
         }
     }
-
-    if(any(phy$edge.length<=1e-5)){
-      warning("Branch lengths of 0 detected. Adding 1e-5 to these branches.", immediate. = TRUE)
-      phy$edge.length[phy$edge.length<=1e-5] <- 1e-5
+    
+    if(any(phy$edge.length<=.Machine$double.eps)){
+      warning(paste0("Branch lengths of 0 detected. Adding ", sqrt(.Machine$double.eps)), immediate. = TRUE)
+      phy$edge.length <- phy$edge.length + sqrt(.Machine$double.eps) 
     }
 
     #Creates the data structure and orders the rows to match the tree.
@@ -94,18 +100,15 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
     counts <- table(data.sort[,1])
     levels <- levels(as.factor(data.sort[,1]))
     cols <- as.factor(data.sort[,1])
-    cat("State distribution in data:\n")
-    cat("States:",levels,"\n",sep="\t")
-    cat("Counts:",counts,"\n",sep="\t")
-
     #Some initial values for use later
-    k=2
+    k <- 2
     if(upper.bound < lower.bound){
       cat("Your upper bound is smaller than your lower bound.\n")
     }
     lb <- log(lower.bound)
     ub <- log(upper.bound)
     order.test <- TRUE
+	set.fog <- FALSE
 
     obj <- NULL
     nb.tip <- length(phy$tip.label)
@@ -114,9 +117,8 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
     root.p <- root.p
     nstarts <- nstarts
     ip <- ip
-
-
-    model.set.final <- rate.cat.set.corHMM.JDB(phy=phy,data=input.data,rate.cat=rate.cat,ntraits=nObs,model=model,rate.mat=rate.mat, collapse=collapse)
+    
+    model.set.final <- rate.cat.set.corHMM.JDB(phy=phy, data=input.data, rate.cat=rate.cat, ntraits=nObs, model=model, rate.mat=rate.mat, collapse=collapse)
     phy <- reorder(phy, "pruningwise")
 
     # this allows for custom rate matricies!
@@ -138,23 +140,87 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
         }
         ###############################
     }
-
+    
+    if(collapse){
+      StateNames <- gsub("_", "|", CorData$ObservedTraits)
+    }else{
+      StateNames <- gsub("_", "|", CorData$PossibleTraits)
+    }  
+    print_counts <- rep(0, length(StateNames))
+    if(length(grep("&", names(counts))) > 0){
+      counts <- counts[-grep("&", names(counts))]
+    }
+    print_counts[as.numeric(names(counts))] <- counts
+    cat("State distribution in data:\n")
+    cat("States:",StateNames,"\n",sep="\t")
+    cat("Counts:",print_counts,"\n",sep="\t")
+    
     lower = rep(lb, model.set.final$np)
     upper = rep(ub, model.set.final$np)
-
-
+    
+	if(!is.null(tip.fog)){
+		if(sum(tip.fog) < 1){
+			if(length(tip.fog) == 1){
+				#Default option, but need to replicate these values across the observed states
+				tip.fog <- rep(tip.fog, length(StateNames))
+			}
+			if(rate.cat > 1){
+				#Error only applies to observed states, but need to replicate across the rate categories:
+				tip.fog <- rep(tip.fog, rate.cat)
+				for(tip.index in 1:Ntip(phy)){
+					#Why is this here? What happens if someone does not know the state. We would code all states as 1. So here, we just alter if there are zeros for a tip:
+					num.zeros <- length(model.set.final$liks[tip.index,which(model.set.final$liks[tip.index,]==0)])
+					if(num.zeros > 0){
+						model.set.final$liks[tip.index,which(model.set.final$liks[tip.index,]==1)] <- 1 - (sum(tip.fog[which(model.set.final$liks[tip.index,]!=1)])/rate.cat)
+						model.set.final$liks[tip.index,which(model.set.final$liks[tip.index,]==0)] <- tip.fog[which(model.set.final$liks[tip.index,]==0)]
+						set.fog <- FALSE
+					}
+				}
+			}else{
+				for(tip.index in 1:Ntip(phy)){
+					#Why is this here? What happens if someone does not know the state. We would code all states as 1. So here, we just alter if there are zeros for a tip:
+					num.zeros <- length(model.set.final$liks[tip.index,which(model.set.final$liks[tip.index,]==0)])
+					if(num.zeros > 0){
+						model.set.final$liks[tip.index,which(model.set.final$liks[tip.index,]==1)] <- 1 - sum(tip.fog[which(model.set.final$liks[tip.index,]!=1)])
+						model.set.final$liks[tip.index,which(model.set.final$liks[tip.index,]==0)] <- tip.fog[which(model.set.final$liks[tip.index,]==0)]
+						set.fog <- FALSE
+					}
+				}
+			}
+		}else{
+			if(rate.cat > 1){
+				tip.fog <- rep(tip.fog, rate.cat)
+				model.set.final$fog.vec <- tip.fog
+			}else{
+				model.set.final$fog.vec <- tip.fog
+			}
+			set.fog <- TRUE
+		}
+	}
+	
+	
     if(is.null(opts)){
       opts <- list("algorithm"="NLOPT_LN_SBPLX", "maxeval"="1000000", "ftol_rel"=.Machine$double.eps^0.5)
     }
 
     if(!is.null(p)){
         cat("Calculating likelihood from a set of fixed parameters", "\n")
-        out<-NULL
-        est.pars<-log(p)
-        out$objective <- dev.corhmm(est.pars,phy=phy,liks=model.set.final$liks,Q=model.set.final$Q,rate=model.set.final$rate,root.p=root.p, rate.cat = rate.cat, order.test = order.test, lewis.asc.bias = lewis.asc.bias)
+        out <- NULL
+        est.pars <- log(p)
+        out$objective <- dev.corhmm(est.pars, phy=phy, liks=model.set.final$liks, Q=model.set.final$Q, rate=model.set.final$rate, root.p=root.p, rate.cat = rate.cat, order.test = order.test, lewis.asc.bias = lewis.asc.bias, set.fog = set.fog, fog.vec = model.set.final$fog.vec)
         loglik <- -out$objective
         est.pars <- exp(est.pars)
-    } else {
+		if(set.fog){
+			fog.est <- est.pars[1:length(unique(model.set.final$fog.vec))]
+			est.pars <- est.pars[-c(1:length(unique(model.set.final$fog.vec)))]
+		}else{
+			if(is.numeric(tip.fog)){
+				fog.est <- tip.fog
+			}else{
+				fog.est <- NULL
+			}
+		}
+    }else{
         if(is.null(ip)){
             #If a user-specified starting value(s) is not supplied this begins loop through a set of randomly chosen starting values:
             #Sets parameter settings for random restarts by taking the parsimony score and dividing
@@ -176,19 +242,38 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
                 par.score <- parsimony(phy.tmp, dat, method="fitch")/2
             }
             tl <- sum(phy$edge.length)
-            mean.change = par.score/tl
+            mean.change <- par.score/tl
             random.restart<-function(nstarts){
-                tmp = matrix(,1,ncol=(1+model.set.final$np))
                 if(mean.change==0){
-                    starts=rep(0.01+exp(lb), model.set.final$np)
+                    starts <- rep(0.01 + exp(lb), model.set.final$np)
+					if(set.fog == TRUE){
+						starts <- c(rep(fog.ip, length(unique(model.set.final$fog.vec))), starts)
+						lower <- c(rep(lb, length(unique(model.set.final$fog.vec))), lower)
+						upper <- c(rep(log(0.50), length(unique(model.set.final$fog.vec))), upper)
+						tmp <- matrix(,1,ncol=(1 + model.set.final$np + length(unique(model.set.final$fog.vec))))
+					}else{
+						tmp <- matrix(,1,ncol=(1 + model.set.final$np))
+					}
                 }else{
-                    starts<-sort(rexp(model.set.final$np, 1/mean.change), decreasing = TRUE)
+                    starts <- sort(rexp(model.set.final$np, 1/mean.change), decreasing = TRUE)
+					if(set.fog == TRUE){
+						starts <- c(rep(fog.ip, length(unique(model.set.final$fog.vec))), starts)
+						lower <- c(rep(lb, length(unique(model.set.final$fog.vec))), lower)
+						upper <- c(rep(log(0.50), length(unique(model.set.final$fog.vec))), upper)
+						tmp <- matrix(,1,ncol=(1 + model.set.final$np + length(unique(model.set.final$fog.vec))))
+					}else{
+						tmp <- matrix(,1,ncol=(1+model.set.final$np))
+					}
                 }
-                starts[starts < exp(lb)] = exp(lb)
-                starts[starts > exp(ub)] = exp(ub)
-                out = nloptr(x0=log(starts), eval_f=dev.corhmm, lb=lower, ub=upper, opts=opts, phy=phy, liks=model.set.final$liks,Q=model.set.final$Q,rate=model.set.final$rate,root.p=root.p, rate.cat = rate.cat, order.test = order.test, lewis.asc.bias = lewis.asc.bias)
-                tmp[,1] = out$objective
-                tmp[,2:(model.set.final$np+1)] = out$solution
+                starts[starts < exp(lb)] <- exp(lb)
+                starts[starts > exp(ub)] <- exp(lb)
+                out <- nloptr(x0=log(starts), eval_f=dev.corhmm, lb=lower, ub=upper, opts=opts, phy=phy, liks=model.set.final$liks,Q=model.set.final$Q,rate=model.set.final$rate,root.p=root.p, rate.cat = rate.cat, order.test = order.test, lewis.asc.bias = lewis.asc.bias, set.fog = set.fog, fog.vec = model.set.final$fog.vec)
+                tmp[,1] <- out$objective
+				if(set.fog == TRUE){
+					tmp[,2:(model.set.final$np + 1 + length(unique(model.set.final$fog.vec)))] <- out$solution
+				}else{
+					tmp[,2:(model.set.final$np + 1 )] <- out$solution
+				}
                 tmp
             }
             if(n.cores > 1){
@@ -199,18 +284,47 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
             #Finds the best fit within the restart.set list
             best.fit<-which.min(unlist(lapply(restart.set, function(x) x[1])))
             #Generates an object to store results from restart algorithm:
-            out<-NULL
+            out <- NULL
             out$objective=unlist(restart.set[[best.fit]][,1])
-            out$solution=unlist(restart.set[[best.fit]][,2:(model.set.final$np+1)])
+			if(set.fog == TRUE){
+				out$solution=unlist(restart.set[[best.fit]][,2:(model.set.final$np + 1 + length(unique(model.set.final$fog.vec)))])
+			}else{
+				out$solution=unlist(restart.set[[best.fit]][,2:(model.set.final$np+1)])
+			}
             loglik <- -out$objective
             est.pars <- exp(out$solution)
+			if(set.fog == TRUE){
+				fog.est <- est.pars[1:length(unique(model.set.final$fog.vec))]
+				est.pars <- est.pars[-c(1:length(unique(model.set.final$fog.vec)))]
+			}else{
+				if(is.numeric(tip.fog)){
+					fog.est <- tip.fog
+				}else{
+					fog.est <- NULL
+				}
+			}
         }else{
             # the user has specified initial params
             cat("Beginning subplex optimization routine -- Starting value(s):", ip, "\n")
-            ip=ip
-            out = nloptr(x0=rep(log(ip), length.out = model.set.final$np), eval_f=dev.corhmm, lb=lower, ub=upper, opts=opts, phy=phy,liks=model.set.final$liks,Q=model.set.final$Q,rate=model.set.final$rate,root.p=root.p, rate.cat = rate.cat, order.test = order.test, lewis.asc.bias = lewis.asc.bias)
+            ip <- ip
+			if(set.fog == TRUE){
+				ip <- c(rep(0.01, length(unique(model.set.final$fog.vec))), ip)
+				lower <- c(rep(lb, length(unique(model.set.final$fog.vec))), lower)
+				upper <- c(rep(log(0.50), length(unique(model.set.final$fog.vec))), upper)
+			}
+            out = nloptr(x0=rep(log(ip), length.out = model.set.final$np), eval_f=dev.corhmm, lb=lower, ub=upper, opts=opts, phy=phy,liks=model.set.final$liks,Q=model.set.final$Q,rate=model.set.final$rate,root.p=root.p, rate.cat = rate.cat, order.test = order.test, lewis.asc.bias = lewis.asc.bias, set.fog = set.fog, fog.vec = model.set.final$fog.vec)
             loglik <- -out$objective
             est.pars <- exp(out$solution)
+			if(set.fog == TRUE){
+				fog.est <- est.pars[1:length(unique(model.set.final$fog.vec))]
+				est.pars <- est.pars[-c(1:length(unique(model.set.final$fog.vec)))]
+			}else{
+				if(is.numeric(tip.fog)){
+					fog.est <- tip.fog
+				}else{
+					fog.est <- NULL
+				}
+			}
         }
     }
 
@@ -225,14 +339,14 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
     }
     TIPS <- 1:nb.tip
     if (node.states == "marginal" || node.states == "scaled"){
-        lik.anc <- ancRECON(phy, input.data, est.pars, rate.cat, rate.mat=rate.mat, method=node.states, ntraits=NULL, root.p=root.p, model = model, get.tip.states = get.tip.states, collapse = collapse)
-        pr<-apply(lik.anc$lik.anc.states,1,which.max)
+        lik.anc <- ancRECON(phy, input.data, est.pars, rate.cat, rate.mat=rate.mat, method=node.states, ntraits=NULL, root.p=root.p, model = model, get.tip.states = get.tip.states, tip.fog = fog.est, collapse = collapse)
+        pr <- apply(lik.anc$lik.anc.states,1, which.max)
         phy$node.label <- pr
         tip.states <- lik.anc$lik.tip.states
         row.names(tip.states) <- phy$tip.label
     }
     if (node.states == "joint"){
-        lik.anc <- ancRECON(phy, input.data, est.pars, rate.cat, rate.mat=rate.mat, method=node.states, ntraits=NULL, root.p=root.p, model = model, get.tip.states = get.tip.states, collapse = collapse)
+        lik.anc <- ancRECON(phy, input.data, est.pars, rate.cat, rate.mat=rate.mat, method=node.states, ntraits=NULL, root.p=root.p, model = model, get.tip.states = get.tip.states, tip.fog = fog.est, collapse = collapse)
         phy$node.label <- lik.anc$lik.anc.states
         tip.states <- lik.anc$lik.tip.states
     }
@@ -244,14 +358,35 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
 
     # finalize the output
     solution <- matrix(est.pars[model.set.final$index.matrix], dim(model.set.final$index.matrix))
-    StateNames <- paste("(", rep(1:(dim(model.set.final$index.matrix)[1]/rate.cat), rate.cat), ",", rep(paste("R", 1:rate.cat, sep = ""), each = nObs), ")", sep = "")
+    if(collapse){
+      StateNames <- rep(gsub("_", "|", CorData$ObservedTraits), rate.cat)
+      RCNames <- rep(paste("R", 1:rate.cat, sep = ""), each = length(CorData$ObservedTraits))
+    }else{
+      StateNames <- rep(gsub("_", "|", CorData$PossibleTraits), rate.cat)
+      RCNames <- rep(paste("R", 1:rate.cat, sep = ""), each = length(CorData$PossibleTraits))
+    }
+    if(rate.cat > 1){
+      StateNames <- paste(RCNames, StateNames)
+    }
+	
+    # StateNames <- paste("(", rep(1:(dim(model.set.final$index.matrix)[1]/rate.cat), rate.cat), ",", rep(paste("R", 1:rate.cat, sep = ""), each = nObs), ")", sep = "")
     rownames(solution) <- colnames(solution) <- StateNames
-    AIC <- -2*loglik+2*model.set.final$np
-    AICc <- -2*loglik+(2*model.set.final$np*(nb.tip/(nb.tip-model.set.final$np-1)))
-
+	if(set.fog == TRUE){
+		tip.fog.probs <- numeric(length(model.set.final$fog.vec))
+		tip.fog.probs[] <- c(fog.est, 0)[model.set.final$fog.vec]
+		names(tip.fog.probs) <- StateNames
+		model.set.final$np <- model.set.final$np + length(unique(model.set.final$fog.vec))
+		AIC <- -2*loglik+2*model.set.final$np
+		AICc <- -2*loglik+(2*model.set.final$np*(nb.tip/(nb.tip-model.set.final$np-1)))
+	}else{
+		tip.fog.probs <- NULL
+		AIC <- -2*loglik+2*model.set.final$np
+		AICc <- -2*loglik+(2*model.set.final$np*(nb.tip/(nb.tip-model.set.final$np-1)))
+	}
     if (is.character(node.states)) {
         if (node.states == "marginal" || node.states == "scaled"){
             colnames(lik.anc$lik.anc.states) <- StateNames
+            colnames(tip.states) <- StateNames
         }
     }
 
@@ -266,7 +401,9 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
     AICc = AICc,
     rate.cat=rate.cat,
     solution=solution,
+	tip.fog.probs=tip.fog.probs,
     index.mat=model.set.final$index.matrix,
+	fog.vec=model.set.final$fog.vec,
     data=input.data,
     data.legend = data.legend,
     phy=phy,
@@ -274,9 +411,11 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
     tip.states=tip.states,
     states.info = lik.anc$info.anc.states,
     iterations=out$iterations,
+    collapse=collapse,
     root.p=root.p,
     args.list=args.list,
-    call = call)
+    call = call
+)
     class(obj)<-"corhmm"
     return(obj)
 }
@@ -289,9 +428,9 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
 ######################################################################################################################################
 ######################################################################################################################################
 
-dev.corhmm <- function(p,phy,liks,Q,rate,root.p,rate.cat,order.test,lewis.asc.bias) {
-
-  p = exp(p)
+dev.corhmm <- function(p, phy, liks, Q, rate, root.p, rate.cat, order.test, lewis.asc.bias, set.fog=FALSE, fog.vec) {
+  
+  p <- exp(p)
   cp_root.p <- root.p
   nb.tip <- length(phy$tip.label)
   nb.node <- phy$Nnode
@@ -301,9 +440,45 @@ dev.corhmm <- function(p,phy,liks,Q,rate,root.p,rate.cat,order.test,lewis.asc.bi
   anc <- unique(phy$edge[,1])
   k.rates <- dim(Q)[2] / 2
   if (any(is.nan(p)) || any(is.infinite(p))) return(1000000)
-
+  
+  #Sets up the liks matrix to account for tip fog:
+  if(set.fog == TRUE){
+	  tip.fog.tmp <- p[1:length(unique(fog.vec))]
+	  p <- p[-c(1:length(unique(fog.vec)))]
+	  tip.fog <- numeric(length(fog.vec))
+	  tip.fog[] <- c(tip.fog.tmp, 0)[fog.vec]
+	  if(rate.cat > 1){
+		  #Error only applies to observed states, but need to replicate across the rate categories:
+		  #tip.fog <- rep(tip.fog, rate.cat)
+		  for(tip.index in 1:Ntip(phy)){
+			  #Why is this here? What happens if someone does not know the state. We would code all states as 1. So here, we just alter if there are zeros for a tip:
+			  num.zeros <- length(liks[tip.index,which(liks[tip.index,]==0)])
+			  if(num.zeros > 0){
+				  liks[tip.index,which(liks[tip.index,]==1)] <- 1 - (sum(tip.fog[which(liks[tip.index,]!=1)])/rate.cat)
+				  liks[tip.index,which(liks[tip.index,]==0)] <- tip.fog[which(liks[tip.index,]==0)]
+			  }
+		  }
+	  }else{
+		  for(tip.index in 1:Ntip(phy)){
+			  #Why is this here? What happens if someone does not know the state. We would code all states as 1. So here, we just alter if there are zeros for a tip:
+			  num.zeros <- length(liks[tip.index,which(liks[tip.index,]==0)])
+			  if(num.zeros > 0){
+				  liks[tip.index,which(liks[tip.index,]==1)] <- 1 - sum(tip.fog[which(liks[tip.index,]!=1)])
+				  liks[tip.index,which(liks[tip.index,]==0)] <- tip.fog[which(liks[tip.index,]==0)]
+			  }
+		  }
+	  }
+  }
+  
   Q[] <- c(p, 0)[rate]
   diag(Q) <- -rowSums(Q)
+  
+  # an error check for rates that are really weird
+  test_mat <- expm(Q, method=c("Ward77"))
+  if(any(round(rowSums(test_mat))> 2)){
+    return(1000000)
+  }
+
   # # if the q matrix has columns not estimated, remove them
   # row2rm <- apply(rate, 1, function(x) all(x == max(rate)))
   # col2rm <- apply(rate, 2, function(x) all(x == max(rate)))
@@ -350,9 +525,9 @@ dev.corhmm <- function(p,phy,liks,Q,rate,root.p,rate.cat,order.test,lewis.asc.bi
       ##Allows for fixed nodes based on user input tree.
       if(!is.null(phy$node.label)){
           if(!is.na(phy$node.label[focal - nb.tip])){
-              fixer.tmp = numeric(dim(Q)[2]/rate.cat)
-              fixer.tmp[phy$node.label[focal - nb.tip]] = 1
-              fixer = rep(fixer.tmp, rate.cat)
+              fixer.tmp <- numeric(dim(Q)[2]/rate.cat)
+              fixer.tmp[phy$node.label[focal - nb.tip]] <- 1
+              fixer <- rep(fixer.tmp, rate.cat)
               v <- v * fixer
           }
       }
@@ -445,7 +620,7 @@ rate.cat.set.corHMM.JDB <- function(phy,data,rate.cat, ntraits, model, rate.mat=
     nb.node <- phy$Nnode
     obj$rate.cat<-rate.cat
     if(is.null(rate.mat)){
-      rate <- getStateMat4Dat(data, model)$rate.mat
+      rate <- getStateMat4Dat(data, model, collapse = collapse)$rate.mat
       if(rate.cat > 1){
         StateMats <- vector("list", rate.cat)
         for(i in 1:rate.cat){
@@ -455,9 +630,9 @@ rate.cat.set.corHMM.JDB <- function(phy,data,rate.cat, ntraits, model, rate.mat=
       }
     }else{
       rate <- rate.mat
-      ntraits <- dim(rate)[1]/rate.cat
+      nTraits <- dim(rate)[1]/rate.cat
     }
-    nTraits <- dim(rate)[1]
+    nTraits <- dim(rate)[1]/rate.cat
     rate[rate == 0] <- NA
     index.matrix<-rate
     rate[is.na(rate)]<-max(rate,na.rm=TRUE)+1
@@ -480,40 +655,60 @@ rate.cat.set.corHMM.JDB <- function(phy,data,rate.cat, ntraits, model, rate.mat=
     # for(i in 1:nb.tip){
     #     if(is.na(x[i])){x[i]=2}
     # }
-
-    tmp <- matrix(0, nb.tip + nb.node, ntraits)
+    
+    tmp <- matrix(0, nb.tip + nb.node, nTraits)
     for(i in 1:nb.tip){
-        state_index <- as.numeric(unlist(strsplit(as.character(data[i,2]), "&")))
-        tmp[i, state_index] <- 1
+        focal_state <- matching$data[i,2]
+        if(focal_state == "?"){
+          tmp[i, ] <- 1
+        }else{
+          state_index <- as.numeric(unlist(strsplit(as.character(focal_state), "&")))
+          tmp[i, state_index] <- 1
+        }
     }
-    liks <- matrix(rep(tmp, rate.cat), nb.tip + nb.node, ntraits*rate.cat)
-
+    liks <- matrix(rep(tmp, rate.cat), nb.tip + nb.node, nTraits*rate.cat)
+    
     Q <- matrix(0, dim(rate)[1], dim(rate)[1])
-
-    obj$np<-max(rate)-1
-    obj$rate<-rate
-    obj$index.matrix<-index.matrix
-    obj$liks<-liks
-    obj$Q<-Q
-
+	
+    obj$np <- max(rate) - 1
+    obj$rate <- rate
+    obj$index.matrix <- index.matrix
+    obj$liks <- liks
+    obj$Q <- Q
+    
     return(obj)
 }
 
-corProcessData <- function(data, collapse=TRUE){
+
+corProcessData <- function(data, rate.mat=NULL, collapse=FALSE){
   nCol <- dim(data)[2]
   LevelList <- StateMats <- vector("list", nCol-1)
   # detect the number of states in each column. & is treated as indicating polymorphism. ? is treated as unknown data.
   for(i in 2:nCol){
-    data[,i] <- as.character(data[,i])
-    data_i <- as.character(data[,i])
-    data_i <- data_i[!data_i == "?"]
-    States_i <- unique(unlist(strsplit(data_i, "&")))
+    # 4/2/25 Caetano: Fix bug that causes "States_i" to become NULL.
+    data_tmp <- data[,i]
+    if(!is.factor(data_tmp)){
+      data_tmp <- as.factor(data_tmp)
+    }
+    States_i <- levels(data_tmp)
+    if(any(States_i == "?")){
+      States_i <- States_i[!States_i == "?"]
+    }
+    if(length(grep("&", States_i)) > 0){
+      States_i <- unique(unlist(strsplit(States_i, "&")))
+    }
+    
     StateMats[[i-1]] <- getRateCatMat(length(States_i))
-    LevelList[[i-1]] <- sort(States_i)
+    LevelList[[i-1]] <- States_i
+    # if(any(is.na(suppressWarnings(as.numeric(States_i))))){
+    #   LevelList[[i-1]] <- sort(States_i)
+    # }else{
+    #   LevelList[[i-1]] <- States_i[sort(as.numeric(States_i), index.return=TRUE)$ix]
+    # }
   }
   # identify the possible trait combinations
   TraitList <- expand.grid(LevelList)
-  Traits <- sort(apply(TraitList, 1, function(x) paste(c(x), collapse = "_")))
+  Traits <- apply(TraitList, 1, function(x) paste(c(x), collapse = "_"))
   # convert each column into a numeric value associated with a member of the trait combinations. ? are associated with all values of that column, & indicates the combination of two or more
   search.strings <- observed.traits_index <- combined.data <- c()
   for(i in 1:dim(data)[1]){
@@ -527,39 +722,33 @@ corProcessData <- function(data, collapse=TRUE){
     observed.traits_index <- c(observed.traits_index, grep(search.string_i, Traits))
     search.strings[i] <- search.string_i
   }
-  ObservedTraits <- sort(Traits[unique(observed.traits_index)])
+  ObservedTraits <- Traits[sort(unique(observed.traits_index))]
   if(collapse){
-    corData <- data.frame(sp = data[,1], d = sapply(search.strings, function(x) paste(grep(x, ObservedTraits), collapse="&")))
+    corData <- data.frame(sp = data[,1], 
+                          d = sapply(search.strings, function(x) 
+                            paste(grep(x, ObservedTraits), collapse="&")))
   }else{
-    corData <- data.frame(sp = data[, 1], d = sapply(search.strings, function(x) paste(grep(x, Traits),collapse = "&")))
+    corData <- data.frame(sp = data[, 1], 
+                          d = sapply(search.strings, function(x) 
+                            paste(grep(x, Traits),collapse = "&")))
   }
   return(list(StateMats = StateMats,  PossibleTraits = Traits, ObservedTraits = ObservedTraits, corData = corData))
 }
+
 
 print.corhmm<-function(x,...){
 
     ntips=Ntip(x$phy)
     output<-data.frame(x$loglik,x$AIC,x$AICc,x$rate.cat,ntips, row.names="")
-    names(output)<-c("-lnL","AIC","AICc","Rate.cat","ntax")
+    names(output)<-c("lnL","AIC","AICc","Rate.cat","ntax")
     cat("\nFit\n")
     print(output)
     cat("\n")
-
-    UserStates <- corProcessData(x$data)$ObservedTraits
-
-
-##    ss <- sort(unique(x$data.legend[,2]))
-##    ss <- ss[!grepl("&", ss)]  ## drop ambiguous states
-##     names(UserStates) <- ss
-
-    names(UserStates) <- sort(unique(as.numeric(x$data.legend[,2])))
-    if(length(grep("&", x$data.legend[,2])) > 0){
-      names(UserStates) <- sort(unique(as.numeric(unlist(strsplit(x$data.legend[,2], "&")))))
-    }else{
-      names(UserStates) <- sort(unique(as.numeric(x$data.legend[,2])))
-    }
+    UserStates <- gsub("_", "|", corProcessData(x$data)$PossibleTraits)
+    ColNames <- paste0(colnames(x$data)[-1], collapse = "|")
 
     cat("Legend\n")
+    print(ColNames)
     print(UserStates)
     cat("\n")
 
@@ -568,6 +757,12 @@ print.corhmm<-function(x,...){
     print(param.est)
     cat("\n")
 
+	if(!is.null(x$tip.fog.probs)){
+		cat("Tip fog\n")
+		print(x$tip.fog.probs)
+		cat("\n")
+	}
+	
     if(any(x$eigval<0)){
         index.matrix <- x$index.mat
         #If any eigenvalue is less than 0 then the solution is not the maximum likelihood solution

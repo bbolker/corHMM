@@ -410,42 +410,87 @@ rate.mat.maker.JDB <-function(rate.cat, hrm=TRUE, ntraits=2, nstates=NULL, model
   return(FullMat)
 }
 
+# Function to check if two states can transition in one step
+can_transition <- function(state1, state2) {
+  sum(state1 != state2) == 1
+}
+
+# Function to get the transition type key
+get_transition_key <- function(state1, state2) {
+  base1 <- state1[1]
+  base2 <- state2[1]
+  type <- paste(base1, base2, sep = "_")
+  return(type)
+}
+
 getStateMat4Dat <- function(data, model = "ARD", dual = FALSE, collapse = TRUE, indep = FALSE){
 
   CorData <- corProcessData(data, collapse)
-
   data.legend <- CorData$ObservedTraits
-  if(length(grep("&", CorData$corData[,2])) > 0){
-    nObs <- max(as.numeric(unlist(strsplit(CorData$corData[,2], "&"))))
-  }else{
-    nObs <- max(as.numeric(CorData$corData[,2]))
-  }
-  #nObs <- max(as.numeric(CorData$corData[,2]), na.rm = TRUE)
-  nCol <- dim(data)[2]
-
-  if(nCol > 2){
-    StateMats <- CorData$StateMats
-    IMats <- lapply(StateMats, convert2I)
-    CurrentMat <- StateMats[[1]]
-    for(i in 2:length(StateMats)){
-      # this produces an independent model
-      max.k <- max(CurrentMat)
-      next_mat <- StateMats[[i]]
-      next_mat[next_mat > 0] <- next_mat[next_mat > 0] + max.k
-      CurrentMat <- CurrentMat %x% IMats[[i]] + convert2I(CurrentMat) %x% next_mat
-      IndepMat <- CurrentMat
-      # update it to be a dependent model
-      CurrentMat[which(CurrentMat > 0)] <- 1:length(which(CurrentMat > 0))
-      if(indep){
-        rate.mat <- IndepMat
-      }else{
-        rate.mat <- CurrentMat
+  nObs <- length(data.legend)
+  poss_states <- do.call(rbind, strsplit(CorData$PossibleTraits, "_"))
+  index_mat <- matrix(0, nrow = nrow(poss_states), ncol = nrow(poss_states), 
+                      dimnames = list(CorData$PossibleTraits, CorData$PossibleTraits))
+  # Dictionary to store the unique transition counts
+  transition_counts <- list()
+  # Initialize a counter
+  count <- 1
+  # Fill the transition matrix with allowed transitions based on unique counts for each type
+  for (i in 1:nrow(poss_states)) {
+    for (j in 1:nrow(poss_states)) {
+      if (i != j && can_transition(poss_states[i, ], poss_states[j, ])) {
+        if(indep){
+          is_changing <- which(poss_states[i,] != poss_states[j,])
+          type <- paste(c(poss_states[i,is_changing], poss_states[j,is_changing]), collapse = "_")
+          transition_key <- paste0("s", is_changing, "_t", type)
+          if (!transition_key %in% names(transition_counts)) {
+            transition_counts[[transition_key]] <- count
+            count <- count + 1
+          }
+          index_mat[i, j] <- transition_counts[[transition_key]]
+          
+          
+        }else{
+          index_mat[i, j] <- count
+          count <- count + 1
+        }
       }
     }
-  }else{
-    rate.mat <- CorData$StateMats[[1]]
   }
-
+  
+  # if(length(grep("&", CorData$corData[,2])) > 0){
+  #   nObs <- max(as.numeric(unlist(strsplit(CorData$corData[,2], "&"))))
+  # }else{
+  #   nObs <- max(as.numeric(CorData$corData[,2]))
+  # }
+  #nObs <- max(as.numeric(CorData$corData[,2]), na.rm = TRUE)
+  # nCol <- dim(data)[2]
+  # 
+  # if(nCol > 2){
+  #   StateMats <- CorData$StateMats
+  #   IMats <- lapply(StateMats, convert2I)
+  #   CurrentMat <- StateMats[[1]]
+  #   for(i in 2:length(StateMats)){
+  #     # this produces an independent model
+  #     max.k <- max(CurrentMat)
+  #     next_mat <- StateMats[[i]]
+  #     next_mat[next_mat > 0] <- next_mat[next_mat > 0] + max.k
+  #     CurrentMat <- CurrentMat %x% IMats[[i]] + convert2I(CurrentMat) %x% next_mat
+  #     IndepMat <- CurrentMat
+  #     # update it to be a dependent model
+  #     CurrentMat[which(CurrentMat > 0)] <- 1:length(which(CurrentMat > 0))
+  #     if(indep){
+  #       rate.mat <- IndepMat
+  #     }else{
+  #       rate.mat <- CurrentMat
+  #     }
+  #   }
+  # }else{
+  #   rate.mat <- CorData$StateMats[[1]]
+  # }
+  
+  rate.mat <- index_mat
+  
   # adjusting the rate mat if there are any unobsered states
   if(collapse){
     ObservedTraitIndex <- which(CorData$PossibleTraits %in% CorData$ObservedTraits)
@@ -454,6 +499,12 @@ getStateMat4Dat <- function(data, model = "ARD", dual = FALSE, collapse = TRUE, 
   }
   # there is a possibility that some states require dual transitions, in these cases we allow all transitions to occur.
   if(dual){
+    if (collapse) {
+      nObs <- length(CorData$ObservedTraits)
+    }
+    else {
+      nObs <- length(CorData$PossibleTraits)
+    }
     rate.mat <- getStateMat(nObs)
   }
 
@@ -472,15 +523,13 @@ getStateMat4Dat <- function(data, model = "ARD", dual = FALSE, collapse = TRUE, 
       rate.mat[rate.mat > 0] <- 1:length(rate.mat[rate.mat > 0])
     }
   }
-
-  colnames(rate.mat) <- rownames(rate.mat) <- paste("(", 1:nObs, ")", sep ="")
+  legend <- paste0(colnames(data)[-1], collapse = "|")
   if(collapse){
-    legend <- CorData$ObservedTraits
-    names(legend) <- 1:nObs
+    StateNames <- gsub("_", "|", CorData$ObservedTraits)
   }else{
-    legend <- CorData$PossibleTraits
-    names(legend) <- 1:nObs
+    StateNames <- gsub("_", "|", CorData$PossibleTraits)
   }
+  colnames(rate.mat) <- rownames(rate.mat) <- StateNames
   res <- list(legend = legend, rate.mat = rate.mat)
   return(res)
 }

@@ -38,12 +38,16 @@ makeSimmap <- function(tree, data, model, rate.cat, root.p="yang", nSim=1, nCore
   maps <- simSubstHistory(tree, conditional.lik$tip.states, conditional.lik$node.states, model, nSim, nCores, max.attempt)
   mapped.edge <- lapply(maps, function(x) convertSubHistoryToEdge(tree, x))
   obj <- vector("list", nSim)
-  legend <- getStateMat4Dat(data, collapse = collapse)$legend
-  if(rate.cat > 1){
-    StateNames <- paste("(", rep(legend, rate.cat), ",", rep(paste("R", 1:rate.cat, sep = ""), each = length(legend)), ")", sep = "")
-    names(StateNames) <- 1:length(StateNames)
+  CorData <- corProcessData(data, collapse = collapse)
+  if(collapse){
+    StateNames <- rep(gsub("_", "|", CorData$ObservedTraits), rate.cat)
+    RCNames <- rep(paste("R", 1:rate.cat, sep = ""), each = length(CorData$ObservedTraits))
   }else{
-    StateNames <- legend
+    StateNames <- rep(gsub("_", "|", CorData$PossibleTraits), rate.cat)
+    RCNames <- rep(paste("R", 1:rate.cat, sep = ""), each = length(CorData$PossibleTraits))
+  }
+  if(rate.cat > 1){
+    StateNames <- paste(RCNames, StateNames)
   }
   for(i in 1:nSim) {
     tree.simmap <- tree
@@ -73,7 +77,7 @@ makeSimmap <- function(tree, data, model, rate.cat, root.p="yang", nSim=1, nCore
 }
 
 correctMapName <- function(map_element, state_names){
-  names(map_element) <- state_names[match(as.numeric(names(map_element)), as.numeric(names(state_names)))]
+  names(map_element) <- state_names[as.numeric(names(map_element))]
   return(map_element)
 }
 
@@ -259,23 +263,25 @@ getConditionalNodeLik <- function(tree, data, model, rate.cat, root.p, parsimony
     liks[focal, ] <- v/sum(v)
   }
   input.root.p <- root.p
-  if(!is.null(input.root.p)){
-    if(!is.character(input.root.p)){
-      root.p <- input.root.p/sum(input.root.p)
-    }
+  if(is.numeric(input.root.p)){
+    root.p <- input.root.p/sum(input.root.p)
   }
-  if(is.null(input.root.p) | input.root.p == "flat"){
+  if(is.character(input.root.p)){
+      if(input.root.p == "yang"){
+        root.p <- Null(model)
+        root.p <- c(root.p/sum(root.p))
+        }
+      if(input.root.p == "maddfitz"){
+        root.p <- liks[focal, ]
+        }
+      if(input.root.p == "flat"){
+        root.p <- rep(1/dim(model)[1], dim(model))
+        }
+  }
+  if(is.null(input.root.p)){
     root.p <- rep(1/dim(model)[1], dim(model))
   }
-  if(input.root.p == "yang"){
-    root.p <- Null(model)
-    root.p <- c(root.p/sum(root.p))
-  }
-  if(input.root.p == "maddfitz"){
-    root.p <- liks[focal, ]
-  }
   liks[focal, ] <-  liks[focal, ] * root.p
-
   return(list(tip.states = liks[1:nb.tip,],
               node.states = liks[(nb.tip+1):(nb.node+nb.tip),]))
 }
@@ -417,3 +423,69 @@ FloydWalshAlg <- function(model, init, final){
 #
 # liks <- unlist(lapply(simmap, function(x) getSimmapLik(x, Q)))
 # log(sum(exp(liks)))
+
+# 
+# library(castor)
+# library(corHMM)
+# 
+# data(primates)
+# phy <- primates[[1]]
+# phy <- multi2di(phy)
+# data <- primates[[2]][,-3]
+# 
+# ##run corhmm
+# MK <- corHMM(phy, data, 1)
+# 
+# ##get simmap from corhmm solution
+# model <- MK$solution
+# simmap <- makeSimmap(tree=phy, data=data, model=model, rate.cat=1, nSim=1, nCores=1)[[1]]
+# 
+# ltt_dat <- count_lineages_through_time(phy, 100)
+# 
+# get_edge_span <- function(simmap){
+#   bt <- branching.times(simmap)
+#   time_frame <- simmap$edge
+#   for(i in 1:length(bt)){
+#     index <- simmap$edge[,1] == names(bt)[i]
+#     time_frame[index, 1] <- bt[i]
+#     time_frame[index, 2] <- bt[i] - simmap$edge.length[index]
+#   }
+#   return(time_frame)
+# }
+# 
+# get_char_at_time <- function(time, simmap){
+#   edge_span <- round(get_edge_span(simmap), 4)
+#   edge_index <- which((time <= edge_span[,1]) & (time >= edge_span[,2]))
+#   bt <- branching.times(simmap)
+#   char_at_time <- c()
+#   for(i in edge_index){
+#     focal_map <- simmap$maps[[i]]
+#     if(length(focal_map) == 1){
+#       char <- names(focal_map)
+#     }else{
+#       starting_age <- bt[names(bt) == simmap$edge[i,1]]
+#       time_span <- round(starting_age - cumsum(focal_map), 5)
+#       possible_index <- which(time >= time_span)
+#       char <- names(focal_map)[possible_index[1]]
+#     }
+#     char_at_time <- c(char_at_time, char)
+#   }
+#   char_at_time <- c(char_at_time, colnames(simmap$mapped.edge))
+#   out <- table(char_at_time)
+#   out <- out - 1
+#   return(out)
+# }
+# 
+# ages <- round(ltt_dat$ages, 4)
+# test <- sapply(ages, function(x) get_char_at_time(x, simmap))
+# plot_table <- data.frame(ages = ages, t(test))
+# 
+# library(ggplot2)
+# 
+# ggplot(plot_table, aes(x = rev(ages))) +
+#   geom_line(aes(y = log(X0), color = "X0"), size = 1) +
+#   geom_line(aes(y = log(X1), color = "X1"), size = 1) +
+#   scale_color_manual(values = c("X0" = "blue", "X1" = "red")) +
+#   labs(x = "Ages", y = "Values") +
+#   theme_minimal()
+

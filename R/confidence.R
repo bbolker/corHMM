@@ -168,10 +168,17 @@ HessianConfidence <- function(corhmm.object) {
 # simple function; returns log likelihood
 compute_neglnlikelihood <- function(par, corhmm.object) {
 
+  # legacy code. all previous verions of corhmm don't give the collapse as an output, but it's now needed to create the matrices correctly. 
+  if(is.null(corhmm.object$collapse)){
+    collapse = TRUE # default setting
+  }else{
+    collapse = corhmm.object$collapse
+  }
 	corhmm.object$order.test <- FALSE
 	corhmm.object$phy$node.label <- NULL
-	nObs <- length(corProcessData(corhmm.object$data)$ObservedTraits)
-	model.set.final <- rate.cat.set.corHMM.JDB(phy = corhmm.object$phy, data = corhmm.object$data, rate.cat = corhmm.object$rate.cat, ntraits = nObs, model = "ARD")
+	nObs <- dim(corhmm.object$index.mat)[1]/corhmm.object$rate.cat
+	model.set.final <- rate.cat.set.corHMM.JDB(phy = corhmm.object$phy, data = corhmm.object$data, rate.cat = corhmm.object$rate.cat, ntraits = nObs, model = "ARD", collapse=collapse)
+	phy <- reorder(corhmm.object$phy, "pruningwise")
 	rate.mat <- corhmm.object$index.mat
 	rate.mat[rate.mat == 0] <- NA
 	rate <- rate.mat
@@ -196,7 +203,9 @@ compute_neglnlikelihood <- function(par, corhmm.object) {
 		root.p = corhmm.object$root.p,
 		rate.cat = corhmm.object$rate.cat,
 		order.test = corhmm.object$order.test,
-		lewis.asc.bias = ifelse(any(grepl("lewis.asc.bias", names(corhmm.object))), corhmm.object$lewis.asc.bias, FALSE)
+		lewis.asc.bias = ifelse(any(grepl("lewis.asc.bias", names(corhmm.object))), corhmm.object$lewis.asc.bias, FALSE),
+	  set.fog = FALSE, 
+	  fog.vec = model.set.final$fog.vec
 	)
 
 	#return(dev.corhmm(log(par), corhmm_object$phy, liks=42, Q=42, rate=42, root.p=corhmm.object$root.p, rate.cat=42, order.test=42, lewis.asc.bias=ifelse(any(grepl("lewis.asc.bias", names(corhmm.object))), corhmm.object$lewis.asc.bias, FALSE)))
@@ -248,7 +257,7 @@ GetGridPoints <- function(lower, upper, n.points) {
 }
 
 GetLHSPoints <- function(lower, upper, n.points) {
-	raw.points <- lhs:::randomLHS(n=n.points, k=length(lower))
+	raw.points <- randomLHS(n=n.points, k=length(lower))
 	parameter.matrix <- NA*raw.points
 	for (i in seq_along(lower)) {
 		parameter.matrix[,i] <- qunif(raw.points[,i], min=lower[i], max=upper[i])
@@ -291,7 +300,7 @@ MatrixToPars <- function(corhmm.object) {
 
 	par <- rep(NA,max(index.mat, na.rm=TRUE))
 	for (i in seq_along(par)) {
-		par[i] <- raw.rates[which(index.mat==i)]
+		par[i] <- raw.rates[which(index.mat==i)][1]
 		relevant_indices <- multi.which(index.mat==i)[1,]
 		names(par)[i] <- paste0(rownames(raw.rates)[relevant_indices[1]]," -> ", colnames(raw.rates)[relevant_indices[2]])
 	}
