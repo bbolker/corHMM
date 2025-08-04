@@ -1,6 +1,6 @@
+remotes::install_github("bbolker/corHMM", ref = "bolker_clean")
 library(corHMM)
 library(rbenchmark)
-devtools::load_all()
 data("primates")
 phy <- reorder(primates$tree, "pruningwise")
 
@@ -16,11 +16,13 @@ fit_old <- function() {
 }
 
 fit1 <- fit_old()
+print(fit1)
 
 ## load previously constructed objects (rate index matrix, likelihood matrix, etc.)
 load("misc/model.set.final.rda")
 fit_new <- function() {
-  ff <- with(model.set.final, mkdev.corhmm_rtmb(log(starts), phy, liks, Q,
+  ## mkdev.corhmm_rtmb isn't exported yet ...
+  ff <- with(model.set.final, corHMM:::mkdev.corhmm_rtmb(log(starts), phy, liks, Q,
                                           rate, root.p = "yang",
                                           rate.cat = 1, order.test = FALSE,
                                           lewis.asc.bias = FALSE, set.fog = FALSE, fog.vec = numeric(0)))
@@ -33,11 +35,12 @@ fit_new <- function() {
 
 fit2 <- fit_new()
 
-stopifnot(all.equal(-1*fit1$loglik, opt$objective, tolerance = 2e-8)) ## mean diff: 1.6e-8
-stopifnot(all.equal(opt$par, log(na.omit(c(fit1$solution))),
+stopifnot(all.equal(-1*fit1$loglik, fit2$objective, tolerance = 2e-8)) ## mean diff: 1.6e-8
+stopifnot(all.equal(fit2$par, log(na.omit(c(fit1$solution))),
                     check.attributes  = FALSE, tolerance = 2e-4))
 ## Mean relative difference: 0.000103487
 
+## takes about 1-2 minutes
 bb <- benchmark(fit_old(), fit_new(), replications = 20,
           columns = c("test", "elapsed", "relative"))
 
