@@ -6,7 +6,7 @@
 ######################################################################################################################################
 ######################################################################################################################################
 
-corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.states = "marginal", fixed.nodes=FALSE, p=NULL, root.p="yang", tip.fog=NULL, ip=NULL, fog.ip = 0.01, nstarts=0, n.cores=1, get.tip.states = FALSE, lewis.asc.bias = FALSE, collapse = TRUE, lower.bound = 1e-9, upper.bound = 100, opts=NULL){
+corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.states = "marginal", fixed.nodes=FALSE, p=NULL, root.p="yang", tip.fog=NULL, ip=NULL, fog.ip = 0.01, nstarts=0, n.cores=1, get.tip.states = FALSE, lewis.asc.bias = FALSE, collapse = TRUE, lower.bound = 1e-9, upper.bound = 100, opts=NULL, use_RTMB = FALSE){
     
     # Checks to make sure node.states is not NULL.  If it is, just returns a diagnostic message asking for value.
     if(is.null(node.states)){
@@ -192,8 +192,16 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
 			set.fog <- TRUE
 		}
 	}
-	
-	
+
+  if (use_RTMB) {
+    devfun <- mkdev.corhmm_rtmb(log(starts), phy,
+                                liks=model.set.final$liks, Q=model.set.final$Q,
+                                rate=model.set.final$rate, root.p=root.p,
+                                rate.cat = rate.cat, order.test = order.test,
+                                lewis.asc.bias = lewis.asc.bias, set.fog = set.fog,
+                                fog.vec = model.set.final$fog.vec)
+   }
+
     if(is.null(opts)){
       opts <- list("algorithm"="NLOPT_LN_SBPLX", "maxeval"="1000000", "ftol_rel"=.Machine$double.eps^0.5)
     }
@@ -216,9 +224,9 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
 		}
     }else{
         if(is.null(ip)){
-            #If a user-specified starting value(s) is not supplied this begins loop through a set of randomly chosen starting values:
-            #Sets parameter settings for random restarts by taking the parsimony score and dividing
-            #by the total length of the tree
+            ## If a user-specified starting value(s) is not supplied this begins loop through a set of randomly chosen starting values:
+            ## Sets parameter settings for random restarts by taking the parsimony score and dividing
+            ## by the total length of the tree
             cat("Beginning thorough optimization search -- performing", nstarts, "random restarts", "\n")
             taxa.missing.data.drop <- which(is.na(data.sort[,1]))
             if(length(taxa.missing.data.drop) != 0){
@@ -240,7 +248,7 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
             random.restart<-function(nstarts){
                 if(mean.change==0){
                     starts <- rep(0.01 + exp(lb), model.set.final$np)
-					if(set.fog == TRUE){
+					if(set.fog){
 						starts <- c(rep(fog.ip, length(unique(model.set.final$fog.vec))), starts)
 						lower <- c(rep(lb, length(unique(model.set.final$fog.vec))), lower)
 						upper <- c(rep(log(0.50), length(unique(model.set.final$fog.vec))), upper)
@@ -250,7 +258,7 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
 					}
                 }else{
                     starts <- sort(rexp(model.set.final$np, 1/mean.change), decreasing = TRUE)
-					if(set.fog == TRUE){
+					if(set.fog){
 						starts <- c(rep(fog.ip, length(unique(model.set.final$fog.vec))), starts)
 						lower <- c(rep(lb, length(unique(model.set.final$fog.vec))), lower)
 						upper <- c(rep(log(0.50), length(unique(model.set.final$fog.vec))), upper)

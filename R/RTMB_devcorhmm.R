@@ -161,7 +161,6 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat, order.tes
       }
     }
 
-    print("starting pruning algo")
     ## pruning algo itself!
     for (i in seq(from = 1, length.out = nb.node)) {
       
@@ -192,7 +191,6 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat, order.tes
       ##Divide each likelihood by the sum to obtain probabilities:
       liks[focal, ] <- v/comp[focal]
     }
-    print("after pruning algo")
 
     ##Specifies the root:
     root <- nb.tip + 1L
@@ -219,13 +217,14 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat, order.tes
       loglik<- -(sum(log(comp[-TIPS])) + log(sum(flat.root * liks[root,])))
     }
 
-    print("root.p calc")
     if (is.character(root.p)){
       ## root.p==yang will fix root probabilities based on the inferred rates: q10/(q01+q10)
+      ## i.e. the *stationary distribution*. Null(Q) is giving RTMB a headache so substitute
+      ## a big matrix exponential ...
       if(root.p == "yang"){
-        browser()
-        root.p <- Null(Q)
-        root.p <- c(root.p/sum(root.p))
+        ## root.p <- Null(Q)
+        ## root.p <- c(root.p/sum(root.p))
+        root.p <- Matrix::expm(10000*Q)[1,]
         loglik <- -(sum(log(comp[-TIPS])) + log(sum(root.p * liks[root,])))
         ## if(is.infinite(loglik)){
         ##   stop("infinite loglik in yang root prob computation")
@@ -245,7 +244,6 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat, order.tes
       }
     }
 
-    print("after root.p")
     ## root.p!==NULL will fix root probabilities based on user supplied vector:
     if(lewis.asc.bias) {
       p <- log(p)
@@ -255,7 +253,6 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat, order.tes
     return(loglik)
   }
 
-  ## print(prune_fun(list(p=p)))
   RTMB::MakeADFun(prune_fun, list(p=p), silent = TRUE)
   
 }
