@@ -199,17 +199,17 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat, order.tes
     
     ##If any of the logs have NAs restart search:
     ## if (is.na(sum(log(comp[-TIPS])))){ stop("NA values in logs") }
-    
-    equil.root <- NULL
 
+    ## this was NULL: just for constructing vector?
+    equil.root <- numeric(ncol(Q))
 
-    ## BMB: have to fix this ... ??? use posfun?
+    ## assuming 'positive' means 'not diagonal'
+    QQ <- Q
+    diag(QQ) <- NA
     for(i in 1:ncol(Q)){
-      posrows <- which(Q[,i] >= 0)
-      rowsum <- sum(Q[posrows,i])
-      poscols <- which(Q[i,] >= 0)
-      colsum <- sum(Q[i,poscols])
-      equil.root <- c(equil.root,rowsum/(rowsum+colsum))
+      rowsum <- sum(Q[,i], na.rm=TRUE)
+      colsum <- sum(Q[i,], na.rm=TRUE)
+      equil.root[i] <- rowsum/(rowsum+colsum)
     }
     if (is.null(root.p)){
       flat.root = equil.root
