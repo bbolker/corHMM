@@ -193,7 +193,7 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat, order.tes
       liks[focal, ] <- v/comp[focal]
     }
     print("after pruning algo")
-    
+
     ##Specifies the root:
     root <- nb.tip + 1L
     
@@ -223,6 +223,7 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat, order.tes
     if (is.character(root.p)){
       ## root.p==yang will fix root probabilities based on the inferred rates: q10/(q01+q10)
       if(root.p == "yang"){
+        browser()
         root.p <- Null(Q)
         root.p <- c(root.p/sum(root.p))
         loglik <- -(sum(log(comp[-TIPS])) + log(sum(root.p * liks[root,])))
@@ -254,8 +255,8 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat, order.tes
     return(loglik)
   }
 
-  print(prune_fun(list(p=p)))
-  RTMB::MakeADFun(prune_fun, list(p=p))
+  ## print(prune_fun(list(p=p)))
+  RTMB::MakeADFun(prune_fun, list(p=p), silent = TRUE)
   
 }
 
