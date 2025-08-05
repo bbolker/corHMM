@@ -10,7 +10,6 @@ namedList <- function (...)  {
     setNames(L, nm)
 }
 
-
 ## version of dev.corhmm that does core likelihood computation with RTMB
 ##' @param param parameter vector (rates + fog parameters)
 ##' @param phy phylogenetic tree
@@ -35,7 +34,6 @@ namedList <- function (...)  {
 ##' with(model.set.final, mkdev.corhmm_rtmb(starts, phy, liks, Q, rate, root.p = "maddfitz", rate.cat = 1, order.test = FALSE, lewis.asc.bias = FALSE, set.fog = FALSE, fog.vec = numeric(0)))
 ##'      
 
-library(RTMB)
 mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat, order.test, lewis.asc.bias, set.fog=FALSE, fog.vec) {
   ## isolate computations that depend explicitly on p within the RTMB functions
   ## do as much computation as possible (i.e. computation that depends only on other components)
@@ -43,6 +41,11 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat, order.tes
   ##   but helps with clarity/modularization)
   ## core function **cannot** contain any hard if() statements (e.g. various bits here that return
   ##  <very-large-number> if some 'bad' condition is met
+
+  if (lewis.asc.bias) stop("can't do lewis.asc.bias yet; recursive call to likelihood function ...")
+  if (order.test) stop("can't do order.test (non-differentiable ...)")
+  if (set.fog) warning("set.fog is untested in RTMB implementation")
+
   nb.node <- Nnode(phy)
   nb.tip <- Ntip(phy)
   TIPS <- seq.int(nb.tip)
@@ -55,7 +58,6 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat, order.tes
     "[<-" <- RTMB::ADoverload("[<-")
     "c" <- RTMB::ADoverload("c")
     "diag<-" <- RTMB::ADoverload("diag<-")
-    AD <- RTMB::AD
     RTMB::getAll(pars, tmb_data)
     p <- exp(p)
     cp_root.p <- root.p
@@ -67,18 +69,15 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat, order.tes
     ## Sets up the liks matrix to account for tip fog:
     if (set.fog) {
       fog_pars <- seq.int(length(unique(fog.vec)))
-      ## BMB: will subsetting p in this way confuse RTMB? do we have to do it differently?
-      ##  (try it and find out)
       tip.fog.tmp <- p[fog_pars]
       p <- p[-fog_pars]
       tip.fog <- numeric(length(fog.vec))
       tip.fog[] <- c(tip.fog.tmp, 0)[fog.vec]
 
-      ## BMB: not sure why these two code blocks are separate. The only thing I can see that's different is the division by 'rate.cat'
-      ##  in one place, which doesn't make a difference since rate.cat==1 in the second block anyway?
+      ## BMB: not sure why these two code blocks are separate. The only thing I can see that's different
+      ## is the division by 'rate.cat' in one place, which doesn't make a difference since rate.cat==1
+      ## in the second block anyway?
 
-      ## BMB: this does depend on tip.fog, which depends on a subset of the parameters, so we do have to do it inside the core function
-      
       if(rate.cat > 1){
         ## Error only applies to observed states, but need to replicate across the rate categories:
         ## tip.fog <- rep(tip.fog, rate.cat)
@@ -92,7 +91,7 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat, order.tes
         }
       } else {
         for(tip.index in seq(nb.tip)) {
-                                        #Why is this here? What happens if someone does not know the state. We would code all states as 1. So here, we just alter if there are zeros for a tip:
+          ## Why is this here? What happens if someone does not know the state. We would code all states as 1. So here, we just alter if there are zeros for a tip:
           num.zeros <- length(liks[tip.index,which(liks[tip.index,]==0)])
           if(num.zeros > 0){
             liks[tip.index,which(liks[tip.index,]==1)] <- 1 - sum(tip.fog[which(liks[tip.index,]!=1)])
@@ -102,50 +101,24 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat, order.tes
       }
     }
 
-    ## prune_nll uses:
-    ## Q[Q!=0] <- trans_rates[Q[Q!=0]] 
-    ## diag(Q) <- -1*rowSums(Q)
-    ## return(Q)
-
-    ## ... what's different here??
-    ## jumping through all kinds of hoops with rowSums()/diag()<-, still not sure ...
-
+    ## slightly modified from corHMM, but equivalent
     np <- length(p)
     Q <- rate
-    dimnames(Q) <- NULL
     Q[Q<=np] <- p[Q[Q<=np]]
     Q[rate==np+1] <- 0
 
+    ## replacement for
+    ## diag(Q) <- -rowSums(Q)
     for (i in 1:nrow(Q)) {
       Q[i,i] <- -1*sum(Q[i,])
     }
-    
-    ## an error check for rates that are really weird
 
-    ## have to use a different expm(), but I believe this is the same method as expm::expm(., method = "Ward77")
+    ## have to use a different expm(), but
+    ##   this is the same method as expm::expm(., method = "Ward77")
     test_mat <- Matrix::expm(Q)
-
-    ## rowSums is problematic again (and, we can't use if() anyway
-    ## if(any(round(rowSums(test_mat))> 2)) {
-    ##  stop("bad result in expm()")
-    ## }
     
-    ## # if the q matrix has columns not estimated, remove them
-    ## row2rm <- apply(rate, 1, function(x) all(x == max(rate)))
-    ## col2rm <- apply(rate, 2, function(x) all(x == max(rate)))
-    ## Q.root <- Q[!row2rm | !col2rm, !row2rm | !col2rm]
-    
-    if(is.character(root.p)){
-      if(root.p == "yang"){
-        root.test <- Null(Q)
-        if(dim(root.test)[2]>1){
-          stop("bad root test for 'yang' root probabilities")
-        }
-      }      
-    }
-
     if(order.test) {
-                                        # ensure that the rate classes have mean rates in a consistent order (A > B > C > n)
+      ## ensure that the rate classes have mean rates in a consistent order (A > B > C > n)
       StateOrderMat <- matrix(1, (dim(Q)/rate.cat)[1], (dim(Q)/rate.cat)[2])
       RateClassOrderMat <- matrix(0, rate.cat, rate.cat)
       diag(RateClAssordermat) <- 1:rate.cat

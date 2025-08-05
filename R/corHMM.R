@@ -193,14 +193,14 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
 		}
 	}
 
-  if (use_RTMB) {
-    devfun <- mkdev.corhmm_rtmb(log(starts), phy,
-                                liks=model.set.final$liks, Q=model.set.final$Q,
-                                rate=model.set.final$rate, root.p=root.p,
-                                rate.cat = rate.cat, order.test = order.test,
-                                lewis.asc.bias = lewis.asc.bias, set.fog = set.fog,
-                                fog.vec = model.set.final$fog.vec)
-   }
+  ## if (use_RTMB) {
+  ##   devfun <- mkdev.corhmm_rtmb(log(starts), phy,
+  ##                               liks=model.set.final$liks, Q=model.set.final$Q,
+  ##                               rate=model.set.final$rate, root.p=root.p,
+  ##                               rate.cat = rate.cat, order.test = order.test,
+  ##                               lewis.asc.bias = lewis.asc.bias, set.fog = set.fog,
+  ##                               fog.vec = model.set.final$fog.vec)
+  ##  }
 
     if(is.null(opts)){
       opts <- list("algorithm"="NLOPT_LN_SBPLX", "maxeval"="1000000", "ftol_rel"=.Machine$double.eps^0.5)
@@ -246,30 +246,23 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
             tl <- sum(phy$edge.length)
             mean.change <- par.score/tl
             random.restart<-function(nstarts){
-                if(mean.change==0){
-                    starts <- rep(0.01 + exp(lb), model.set.final$np)
-					if(set.fog){
-						starts <- c(rep(fog.ip, length(unique(model.set.final$fog.vec))), starts)
-						lower <- c(rep(lb, length(unique(model.set.final$fog.vec))), lower)
-						upper <- c(rep(log(0.50), length(unique(model.set.final$fog.vec))), upper)
-						tmp <- matrix(,1,ncol=(1 + model.set.final$np + length(unique(model.set.final$fog.vec))))
-					}else{
-						tmp <- matrix(,1,ncol=(1 + model.set.final$np))
-					}
-                }else{
-                    starts <- sort(rexp(model.set.final$np, 1/mean.change), decreasing = TRUE)
-					if(set.fog){
-						starts <- c(rep(fog.ip, length(unique(model.set.final$fog.vec))), starts)
-						lower <- c(rep(lb, length(unique(model.set.final$fog.vec))), lower)
-						upper <- c(rep(log(0.50), length(unique(model.set.final$fog.vec))), upper)
-						tmp <- matrix(,1,ncol=(1 + model.set.final$np + length(unique(model.set.final$fog.vec))))
-					}else{
-						tmp <- matrix(,1,ncol=(1+model.set.final$np))
-					}
-                }
-                starts[starts < exp(lb)] <- exp(lb)
-                starts[starts > exp(ub)] <- exp(lb)
-                out <- nloptr(x0=log(starts), eval_f=dev.corhmm, lb=lower, ub=upper, opts=opts, phy=phy, liks=model.set.final$liks,Q=model.set.final$Q,rate=model.set.final$rate,root.p=root.p, rate.cat = rate.cat, order.test = order.test, lewis.asc.bias = lewis.asc.bias, set.fog = set.fog, fog.vec = model.set.final$fog.vec)
+              if(mean.change==0){
+                starts <- rep(0.01 + exp(lb), model.set.final$np)
+              } else {
+                starts <- sort(rexp(model.set.final$np, 1/mean.change), decreasing = TRUE)
+              }
+              if (set.fog) {
+                starts <- c(rep(fog.ip, length(unique(model.set.final$fog.vec))), starts)
+                lower <- c(rep(lb, length(unique(model.set.final$fog.vec))), lower)
+                upper <- c(rep(log(0.50), length(unique(model.set.final$fog.vec))), upper)
+                tmp <- matrix(,1,ncol=(1 + model.set.final$np + length(unique(model.set.final$fog.vec))))
+              } else{
+                tmp <- matrix(,1,ncol=(1 + model.set.final$np))
+              }
+              starts[starts < exp(lb)] <- exp(lb)
+              starts[starts > exp(ub)] <- exp(lb)
+            
+          out <- nloptr(x0=log(starts), eval_f=dev.corhmm, lb=lower, ub=upper, opts=opts, phy=phy, liks=model.set.final$liks,Q=model.set.final$Q,rate=model.set.final$rate,root.p=root.p, rate.cat = rate.cat, order.test = order.test, lewis.asc.bias = lewis.asc.bias, set.fog = set.fog, fog.vec = model.set.final$fog.vec)
                 tmp[,1] <- out$objective
 				if(set.fog == TRUE){
 					tmp[,2:(model.set.final$np + 1 + length(unique(model.set.final$fog.vec)))] <- out$solution
