@@ -6,18 +6,11 @@ library(rbenchmark)
 data("primates")
 phy <- reorder(primates$tree, "pruningwise")
 
-## clunky, have to find the right place in corHMM (inside random.restarts())
-##  to save necessary bits ...
-## trace(corHMM, at=46, browser)
-## fit1 <- corHMM(phy = phy, data = primates$trait, rate.cat = 1)
-## save("model.set.final", "starts", file = "model.set.final.rda")
-
 cfun  <- function(...) {
   invisible(capture.output(x <- corHMM(...)))
   x
 }
 parfun <- function(x) log(na.omit(c(x$solution)))
-
 
 fit_orig <- cfun(phy = phy, data = primates$trait, rate.cat = 1)
 print(fit_orig)
