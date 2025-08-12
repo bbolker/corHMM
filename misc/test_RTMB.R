@@ -24,13 +24,11 @@ stopifnot(all.equal(parfun(fit_RTMB), parfun(fit_orig),
 
 ## takes about 1-2 minutes
 bb <- benchmark(
-  cfun(phy = phy, data = primates$trait, rate.cat = 1),
-  cfun(phy = phy, data = primates$trait, rate.cat = 1, use_RTMB = TRUE),
+  orig = cfun(phy = phy, data = primates$trait, rate.cat = 1),
+  RTMB = cfun(phy = phy, data = primates$trait, rate.cat = 1, use_RTMB = TRUE),
   replications = 20,
   columns = c("test", "elapsed", "relative"))
-
-## a slightly unfair comparison because fit_orig() also does some model setup tasks.
-## but the bulk of the time is in the optimization ...
+## only an 8-fold speedup?
 
 ##        test elapsed relative
 ## 2 fit_new()   0.804    1.000

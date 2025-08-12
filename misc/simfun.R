@@ -61,6 +61,6 @@ simfun <- function(nstate = 2, ntrait = 2, ntaxa = 200, seed = NULL,
     as.data.frame() |>
     setname()
 
-  list(tree = phy, data = traitMatrix)
+  list(phy = phy, data = traitMatrix)
 }
 
