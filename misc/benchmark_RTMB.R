@@ -16,8 +16,8 @@ sumfun <- function(ntrait = 2, ntaxa = 200, model = "ARD", seed = NULL, ...) {
   if (!is.null(seed)) set.seed(seed)
   seed <- seed %||% NA
   ss <- simfun(ntrait = ntrait, ntaxa = ntaxa)
-  fit_orig <- fitfun(ss, ...)
-  fit_RTMB <- fitfun(ss, use_RTMB = TRUE, ...)
+  fit_orig <- fitfun(ss, model = model, ...)
+  fit_RTMB <- fitfun(ss, use_RTMB = TRUE, model = model, ...)
   p_orig <- parfun(fit_orig)
   p_RTMB <- parfun(fit_RTMB)
   p_diff <- p_orig-p_RTMB
@@ -39,7 +39,7 @@ sumfun <- function(ntrait = 2, ntaxa = 200, model = "ARD", seed = NULL, ...) {
              )
 }
 
-ntaxvec <- round(exp(seq(log(20), log(500), length.out = 10)))
+ntaxvec <- round(exp(seq(log(20), log(1000), length.out = 15)))
 dd <- expand.grid(seed = 101:105, ntaxa = ntaxvec, ntrait = 2:3, model = c("ARD", "SYM")) |>
   transform(model = as.character(model)) ## factor messes up do.call, converts to numeric
 

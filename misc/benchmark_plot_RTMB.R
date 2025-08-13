@@ -13,10 +13,32 @@ dd2 <- dd |>
   arrange(ldiff) |>
   mutate(n = seq(n()))
 
-filter(dd2, ldiff<0) |> View()
+## filter(dd2, ldiff<0) |> View()
 
 ggplot(dd2, aes(n, ldiff)) + geom_point()
 
 ## will have to hack corHMM further: store convergence codes from optimizer?
 ## explore: which cases are bad?
 ## worst for smallest/overparameterized cases (3 traits/20 taxa, 2 traits/41 taxa)
+
+ddt <- (dd
+  |> select(c(seed, ntrait, ntaxa, model, ends_with("time")))
+  |> pivot_longer(ends_with("time"))
+  |> mutate(across(name, ~ stringr::str_remove(., "\\.time$")))
+  |> separate(name, into = c("method", "type"), sep = "_")
+)
+
+ggplot(ddt, aes(ntaxa, value, colour = method)) +
+  geom_point(aes(shape = interaction(model, ntrait))) +
+  scale_x_log10() + scale_y_log10() +
+  facet_wrap(~type) +
+  geom_smooth()
+
+
+## I suspect that the
+ggplot(ddt, aes(ntaxa, value, colour = interaction(model, ntrait))) +
+  geom_point() +
+  scale_x_log10() + scale_y_log10() +
+  facet_wrap(~type) +
+  geom_smooth(aes(group=interaction(method, model, ntrait)), se  = FALSE)
+
