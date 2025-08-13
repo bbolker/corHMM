@@ -25,6 +25,9 @@ sumfun <- function(ntrait = 2, ntaxa = 200, model = "ARD", seed = NULL, ...) {
   p_orig_trunc <- pmax(p_orig, -10)
   p_RTMB_trunc <- pmax(p_RTMB, -10)
   p_diff_trunc <- p_orig_trunc - p_RTMB_trunc
+  ## get RMSE vs true rates on truncated scale ...
+  p_RTMB_rmse <- sqrt(mean((p_RTMB_trunc - ss$true_rates)^2))
+  p_orig_rmse <- sqrt(mean((p_orig_trunc - ss$true_rates)^2))
   data.frame(seed, ntrait, ntaxa, model,
              RTMB_opt.time = fit_RTMB$opt.time[["elapsed"]],
              orig_opt.time = fit_orig$opt.time[["elapsed"]],
@@ -35,7 +38,9 @@ sumfun <- function(ntrait = 2, ntaxa = 200, model = "ARD", seed = NULL, ...) {
              par.rmsdiff = sqrt(mean(p_diff^2)),
              par.maxdiff = max(abs(p_diff)),
              par.rmsdiff.trunc = sqrt(mean(p_diff_trunc^2)),
-             par.maxdiff.trunc = max(abs(p_diff_trunc))
+             par.maxdiff.trunc = max(abs(p_diff_trunc)),
+             RTMB_rmse = p_RTMB_rmse,
+             orig_rmse = p_orig_rmse
              )
 }
 

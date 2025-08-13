@@ -55,7 +55,8 @@ simfun <- function(nstate = 2, ntrait = 2, ntaxa = 200, seed = NULL,
 
   Q <- Q_template(n=nstate, k= ntrait)
   nrates <- sum(Q != 0)
-  Q[Q!=0] <- rexp(nrates, rate = 1/meanrate)
+  true_rates <- rexp(nrates, rate = 1/meanrate)
+  Q[Q!=0] <- true_rates
 
   s <- phangorn::simSeq(phy, l = 1, Q = Q,
                         type = "USER", levels = seq(nstate^ntrait),
@@ -65,6 +66,7 @@ simfun <- function(nstate = 2, ntrait = 2, ntaxa = 200, seed = NULL,
     as.data.frame() |>
     setname()
 
-  list(phy = phy, data = traitMatrix)
+  list(phy = phy, data = traitMatrix,
+       true_rates = true_rates)
 }
 
