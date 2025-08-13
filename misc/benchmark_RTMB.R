@@ -39,18 +39,18 @@ sumfun <- function(ntrait = 2, ntaxa = 200, model = "ARD", seed = NULL, ...) {
              )
 }
 
-## test
-sumfun()
-
 ntaxvec <- round(exp(seq(log(20), log(500), length.out = 10)))
 dd <- expand.grid(seed = 101:105, ntaxa = ntaxvec, ntrait = 2:3, model = c("ARD", "SYM")) |>
   transform(model = as.character(model)) ## factor messes up do.call, converts to numeric
+
+## test
+sumfun(seed = 105, ntrait = 3, ntaxa = 20)
 
 res <- list()
 for (i in 1:nrow(dd)) {
   print(dd[i,])
   res[[i]] <- do.call(sumfun, dd[i,])
-  saveRDS(res, file = "benchmark1.rds")
+  saveRDS(res, file = "benchmark2.rds")
 }
 res <- do.call(rbind, res)
-saveRDS(res, file = "benchmark1.rds")
+saveRDS(res, file = "benchmark2.rds")

@@ -28,6 +28,10 @@ Q_template <- function(n=3, k= 1, set_indices = TRUE) {
 
 ## convert from enumerated traits (0-7) to 3 binary digits
 ## https://stackoverflow.com/questions/6614283/converting-decimal-to-binary-in-r
+## more general solution?
+##  * vectorize so we can determine max n rather than hard-coding
+##  * allow base > 2!
+
 to_bin <- function(x, n = 2) {
    intToBits(x) |> rev() |> as.integer() |> tail(n)
 }
@@ -42,7 +46,7 @@ setname <- function(x) {cbind(nm = rownames(x), x)}
 ##' simfun(ntaxa = 8)
 simfun <- function(nstate = 2, ntrait = 2, ntaxa = 200, seed = NULL,
                    meanrate = 1) {
-  if (ntrait!=2) stop("oops, simSeq to trait matrix not implemented for ntrait>1")
+  if (nstate>2) stop("oops, simSeq to trait matrix not implemented for nstate>2")
   if (!is.null(seed)) set.seed(seed)
   require("ape")
   require("phangorn")
