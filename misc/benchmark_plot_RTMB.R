@@ -2,7 +2,7 @@ library(tidyverse)
 theme_set(theme_bw())
 
 ## exploring differences ...
-dd <- readRDS("benchmark1.rds")
+dd <- readRDS("benchmark2.rds")
 if (!is.data.frame(dd)) dd <- do.call(rbind, dd)
 print(nrow(dd))
 tail(dd)
@@ -34,7 +34,7 @@ dd_bad <- (dd |>
                   bad = case_when(abs(ldiff)<(1e-2) ~ "OK",
                                   ldiff < 0 ~ "RTMB",
                                   ldiff > 0 ~ "orig")) |>
-           select(c(seed, ntrait, ntaxa, model, bad))
+           select(c(seed, ntrait, ntaxa, model, bad, ldiff))
 )
 
 ddtb <- full_join(ddt, dd_bad,
@@ -52,5 +52,15 @@ ggplot(ddt, aes(ntaxa, value, colour = interaction(model, ntrait))) +
   geom_point() +
   scale_x_log10() + scale_y_log10() +
   facet_wrap(~type) +
-  geom_smooth(aes(group=interaction(method, model, ntrait)), se  = FALSE)
+  geom_smooth(aes(group=interaction(method, model, ntrait),
+                  fill=interaction(model, ntrait)))
+
+
+ggplot(filter(ddtb, type == "opt"), aes(ntaxa, value)) +
+  geom_point(aes(colour = bad, size = 0.2 + abs(ldiff))) +
+  scale_x_log10() + scale_y_log10() +
+  scale_colour_manual(values = c(adjustcolor("grey", alpha.f = 0.2),
+                                 palette()[c(4, 2)])) +
+  scale_size(range = c(3, 10))
+
 

@@ -69,4 +69,3 @@ simfun <- function(nstate = 2, ntrait = 2, ntaxa = 200, seed = NULL,
   list(phy = phy, data = traitMatrix,
        true_rates = true_rates)
 }
-
