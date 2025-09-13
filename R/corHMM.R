@@ -6,7 +6,7 @@
 ######################################################################################################################################
 ######################################################################################################################################
 
-corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.states = "marginal", fixed.nodes=FALSE, p=NULL, root.p="yang", tip.fog=NULL, ip=NULL, fog.ip = 0.01, nstarts=0, n.cores=1, get.tip.states = FALSE, lewis.asc.bias = FALSE, collapse=TRUE, lower.bound = 1e-9, upper.bound = 100, opts=NULL, return.devfun = FALSE) {
+corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.states = "marginal", fixed.nodes=FALSE, p=NULL, root.p="yang", tip.fog=NULL, ip=NULL, fog.ip = 0.01, nstarts=0, n.cores=1, get.tip.states = FALSE, lewis.asc.bias = FALSE, collapse=TRUE, lower.bound = 1e-9, upper.bound = 100, opts=NULL, return.devfun = FALSE, use_RTMB = FALSE) {
 
     call <- match.call()
 
@@ -197,17 +197,36 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
 			set.fog <- TRUE
 		}
 	}
-	
-	
-    if(is.null(opts)){
-      opts <- list("algorithm"="NLOPT_LN_SBPLX", "maxeval"="1000000", "ftol_rel"=.Machine$double.eps^0.5)
-    }
 
-    if(!is.null(p)){
+  np_tot <- length(unique(model.set.final$fog.vec)) + model.set.final$np
+  if (!use_RTMB) {
+    devfun <- dev.corhmm
+  } else {
+    RTMB_obj <- mkdev.corhmm_rtmb(rep(0, np_tot),
+                                phy,
+                                liks=model.set.final$liks, Q=model.set.final$Q,
+                                rate=model.set.final$rate, root.p=root.p,
+                                rate.cat = rate.cat,
+                                ## these two are intentionally disabled
+                                order.test = FALSE,
+                                lewis.asc.bias = FALSE,
+                                set.fog = set.fog,
+                                fog.vec = model.set.final$fog.vec)
+    devfun <- function(p, ...) RTMB_obj$fn(p)
+    devfun_grad <- function(p, ...) RTMB_obj$gr(p)
+  }
+  
+  if(is.null(opts)) {
+    opts <- list("algorithm"="NLOPT_LN_SBPLX", "maxeval"="1000000", "ftol_rel"=.Machine$double.eps^0.5)
+  }
+  if (!is.null(p)){
         cat("Calculating likelihood from a set of fixed parameters", "\n")
         out <- NULL
         est.pars <- log(p)
-        out$objective <- dev.corhmm(est.pars, phy=phy, liks=model.set.final$liks, Q=model.set.final$Q, rate=model.set.final$rate, root.p=root.p, rate.cat = rate.cat, order.test = order.test, lewis.asc.bias = lewis.asc.bias, set.fog = set.fog, fog.vec = model.set.final$fog.vec)
+        out$objective <- with(model.set.final,
+                              devfun(est.pars, phy=phy, liks=liks, Q=Q, rate=rate, root.p=root.p,
+                                     rate.cat = rate.cat, order.test = order.test, lewis.asc.bias = lewis.asc.bias, set.fog = set.fog,
+                                     fog.vec = model.set.final))
         loglik <- -out$objective
         est.pars <- exp(est.pars)
 		if(set.fog){
@@ -220,11 +239,11 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
 				fog.est <- NULL
 			}
 		}
-    }else{
-        if(is.null(ip)){
-            #If a user-specified starting value(s) is not supplied this begins loop through a set of randomly chosen starting values:
-            #Sets parameter settings for random restarts by taking the parsimony score and dividing
-            #by the total length of the tree
+    } else {
+      if(is.null(ip)){
+            ## If a user-specified starting value(s) is not supplied this begins loop through a set of randomly chosen starting values:
+            ## Sets parameter settings for random restarts by taking the parsimony score and dividing
+            ## by the total length of the tree
             cat("Beginning thorough optimization search -- performing", nstarts, "random restarts", "\n")
             taxa.missing.data.drop <- which(is.na(data.sort[,1]))
             if(length(taxa.missing.data.drop) != 0){
@@ -244,49 +263,65 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
             tl <- sum(phy$edge.length)
             mean.change <- par.score/tl
             random.restart<-function(nstarts){
-                if(mean.change==0){
-                    starts <- rep(0.01 + exp(lb), model.set.final$np)
-					if(set.fog == TRUE){
-						starts <- c(rep(fog.ip, length(unique(model.set.final$fog.vec))), starts)
-						lower <- c(rep(lb, length(unique(model.set.final$fog.vec))), lower)
-						upper <- c(rep(log(0.50), length(unique(model.set.final$fog.vec))), upper)
-						tmp <- matrix(,1,ncol=(1 + model.set.final$np + length(unique(model.set.final$fog.vec))))
-					}else{
-						tmp <- matrix(,1,ncol=(1 + model.set.final$np))
-					}
-                }else{
-                    starts <- sort(rexp(model.set.final$np, 1/mean.change), decreasing = TRUE)
-					if(set.fog == TRUE){
-						starts <- c(rep(fog.ip, length(unique(model.set.final$fog.vec))), starts)
-						lower <- c(rep(lb, length(unique(model.set.final$fog.vec))), lower)
-						upper <- c(rep(log(0.50), length(unique(model.set.final$fog.vec))), upper)
-						tmp <- matrix(,1,ncol=(1 + model.set.final$np + length(unique(model.set.final$fog.vec))))
-					}else{
-						tmp <- matrix(,1,ncol=(1+model.set.final$np))
-					}
-                }
-                starts[starts < exp(lb)] <- exp(lb)
-                starts[starts > exp(ub)] <- exp(lb)
-                out <- nloptr(x0=log(starts), eval_f=dev.corhmm, lb=lower, ub=upper, opts=opts, phy=phy, liks=model.set.final$liks,Q=model.set.final$Q,rate=model.set.final$rate,root.p=root.p, rate.cat = rate.cat, order.test = order.test, lewis.asc.bias = lewis.asc.bias, set.fog = set.fog, fog.vec = model.set.final$fog.vec)
+              if(mean.change==0){
+                starts <- rep(0.01 + exp(lb), model.set.final$np)
+              } else {
+                starts <- sort(rexp(model.set.final$np, 1/mean.change), decreasing = TRUE)
+              }
+              if (set.fog) {
+                starts <- c(rep(fog.ip, length(unique(model.set.final$fog.vec))), starts)
+                lower <- c(rep(lb, length(unique(model.set.final$fog.vec))), lower)
+                upper <- c(rep(log(0.50), length(unique(model.set.final$fog.vec))), upper)
+                tmp <- matrix(,1,ncol=(1 + model.set.final$np + length(unique(model.set.final$fog.vec))))
+              } else{
+                tmp <- matrix(,1,ncol=(1 + model.set.final$np))
+              }
+              starts[starts < exp(lb)] <- exp(lb)
+              starts[starts > exp(ub)] <- exp(lb)
+
+              if (!use_RTMB) {
+                out <- nloptr(x0=log(starts),
+                              eval_f=dev.corhmm,
+                              lb=lower, ub=upper, opts=opts, phy=phy,
+                              liks=model.set.final$liks,Q=model.set.final$Q,
+                              rate=model.set.final$rate,
+                              root.p=root.p, rate.cat = rate.cat,
+                              order.test = order.test,
+                              lewis.asc.bias = lewis.asc.bias,
+                              set.fog = set.fog, fog.vec = model.set.final$fog.vec)
                 tmp[,1] <- out$objective
-				if(set.fog == TRUE){
-					tmp[,2:(model.set.final$np + 1 + length(unique(model.set.final$fog.vec)))] <- out$solution
+                est_par <- out$solution
+              } else {
+                out <- nlminb(log(starts),
+                              objective = devfun,
+                              gradient = devfun_grad,
+                              lower = lower,
+                              upper = upper)
+                tmp[,1] <- out$objective
+                est_par <- out$par
+              }
+				if(set.fog){
+					tmp[,2:(model.set.final$np + 1 + length(unique(model.set.final$fog.vec)))] <- est_par
 				}else{
-					tmp[,2:(model.set.final$np + 1 )] <- out$solution
+					tmp[,2:(model.set.final$np + 1 )] <- est_par
 				}
                 tmp
-            }
+            } ## random.restart
+        opt.time <- system.time(
             if(n.cores > 1){
               restart.set<-mclapply(1:nstarts, random.restart, mc.cores=n.cores)
             }else{
               restart.set<-lapply(1:nstarts, random.restart)
             }
+           )
             #Finds the best fit within the restart.set list
             best.fit<-which.min(unlist(lapply(restart.set, function(x) x[1])))
             #Generates an object to store results from restart algorithm:
-            out <- NULL
+        out <- list()
+        out$opt.time <- opt.time
+
             out$objective=unlist(restart.set[[best.fit]][,1])
-			if(set.fog == TRUE){
+			if(set.fog){
 				out$solution=unlist(restart.set[[best.fit]][,2:(model.set.final$np + 1 + length(unique(model.set.final$fog.vec)))])
 			}else{
 				out$solution=unlist(restart.set[[best.fit]][,2:(model.set.final$np+1)])
@@ -433,8 +468,9 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
     root.p=root.p,
     args.list=args.list,
     call = call,
-    devfun = fun
-)
+    devfun = fun,
+    opt.time = out$opt.time
+  )
     class(obj)<-"corhmm"
     return(obj)
 }

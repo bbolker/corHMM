@@ -6,4 +6,10 @@ inst/doc
 *_cache/
 *_files/
 .DS_Store
-
+*~
+**/#*
+**/.#*
+accessoryglands
+*.Rout
+.RData
+>>>>>>> bolker_clean
