@@ -532,7 +532,6 @@ plot_transition_summary <- function(simmap_summaries, cols = NULL) {
   mtext("Summary of Transition Counts and Ages", outer = TRUE, cex = 1.5, line = 0.5)
 }
 # simmap <- makeSimmap(tree=phy, tip.states=tip.states, states=states, model=model, 
->>>>>>> 441dfe42e20ae57db76e90572d2ef4612c719a45
 #                      nSim=10, nCores=1)
 #
 # liks <- unlist(lapply(simmap, function(x) getSimmapLik(x, Q)))

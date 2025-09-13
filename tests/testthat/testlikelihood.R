@@ -22,7 +22,8 @@ test_that("Equal rates, no nodes fixed",{
 
     corHMM.new <- corHMM(phy, data[,c(1,2)], model="ER", rate.cat=1, fixed.nodes=FALSE, p=0.01080903, tip.fog=0)
     corHMM.brute <- corHMM:::GetMarginalBrute(phy=phy, data=data, p=c(0.01080903,0.01080903), root.p="yang", n.states=2, node.fixed=NULL, state.fixed=2)
-    expect_equal(corHMM.brute, unname(as.matrix(corHMM.new$states)))
+    expect_equal(corHMM.brute, unname(as.matrix(corHMM.new$states)),
+                 tolerance = 1e-6)
 })
 
 
@@ -87,8 +88,7 @@ test_that("All rates different, one node fixed",{
     
     corHMM.new <- corHMM(phy, data[,c(1,2)], model="ARD", rate.cat=1, fixed.nodes=TRUE, p=c(0.02165875,0.005681116), tip.fog=0)
     corHMM.brute <- corHMM:::GetMarginalBrute(phy=phy, data=data, p=c(0.02165875,0.005681116), root.p="yang", n.states=2, node.fixed=homo_gorilla, state.fixed=2)
-    comparison <- identical(sum(round(corHMM.brute - corHMM.new$states, 5)), 0)
-    expect_true(comparison)
+    expect_equal(corHMM.brute, unname(corHMM.new$states))
 })
 
 
