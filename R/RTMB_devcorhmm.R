@@ -10,30 +10,6 @@ namedList <- function (...)  {
     setNames(L, nm)
 }
 
-## version of dev.corhmm that does core likelihood computation with RTMB
-##' @param param parameter vector (rates + fog parameters)
-##' @param phy phylogenetic tree
-##' @param liks
-##' @param Q
-##' @param rate
-##' @param root.p
-##' @param rate.cat
-##' @param order.test
-##' @param lewis.asc.bias
-##' @param set.fog
-##' @param fog.vec
-##' @param build (logical) rebuild RTMB function?
-##' @examples
-##' data("primates")
-##' phy <- multi2di(primates[[1]])
-##' data <- primates[[2]]
-##' phy <- reorder(primates$tree, "pruningwise")
-##' ## corHMM(phy = phy, data = primates$trait, rate.cat = 1)
-##' ## save("model.set.final", "starts", file = "model.set.final.rda")
-##' load("model.set.final.rda")
-##' with(model.set.final, mkdev.corhmm_rtmb(starts, phy, liks, Q, rate, root.p = "maddfitz", rate.cat = 1, order.test = FALSE, lewis.asc.bias = FALSE, set.fog = FALSE, fog.vec = numeric(0)))
-##'      
-
 mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat, order.test, lewis.asc.bias, set.fog=FALSE, fog.vec) {
   ## isolate computations that depend explicitly on p within the RTMB functions
   ## do as much computation as possible (i.e. computation that depends only on other components)
