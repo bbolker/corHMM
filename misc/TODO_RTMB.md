@@ -14,6 +14,10 @@
 
 
 * OpenMP parallelization? (Need to think about interaction with multi-start etc.) (see misc/openmp_ex.R ...)  [seems slightly lower priority]
+
+* add code to corHMM that stores the log-likelihoods from *all* of the random starts? (This would be useful e.g. for figuring out whether multiple modes are really being found ...) [maybe BMB will do this?] 
+    * if we had this we could take whatever summary we wanted of the distribution of log-likelihoods when we were summarizing results (min-max? standard dev? )
+
 * `use.fog` ? [seems hard]
 
 ## miscellaneous
