@@ -65,7 +65,5 @@ expect_equal(fit_RTMB$loglik, best_loglik)
 
 cbind(t_RTMB, t_orig, topt_RTMB = fit_RTMB$opt.time, topt_orig = fit_orig$opt.time)
 
-if (FALSE) {
-  devtools::load_all()
-  source("tests/testthat/test-compRTMB.R", echo = TRUE)
-}
+## devtools::load_all()
+## source("tests/testthat/test-compRTMB.R", echo = TRUE)

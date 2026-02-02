@@ -441,9 +441,10 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
       for (n in names(L)) {
         assign(n,L[[n]])
       }
+      if (use_RTMB) return(RTMB_obj)
       dev.corhmm(p, phy,liks, Q, rate, root.p, rate.cat, order.test,
                  lewis.asc.bias)
-    }
+     }
     environment(fun) <- list2env(
         list(p=log(est.pars), phy=phy,liks=model.set.final$liks,
         Q=model.set.final$Q,rate=model.set.final$rate,
