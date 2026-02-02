@@ -28,14 +28,14 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
         }
         if(length(node.states) > 1){ # User did not enter a value, so just pick marginal.
             node.states <- "marginal"
-            cat("No model selected for \'node.states\'. Will perform marginal ancestral state estimation.\n")
+            message("No model selected for \'node.states\'. Will perform marginal ancestral state estimation.\n")
         }
     }
 
     if(fixed.nodes == FALSE){
         if(!is.null(phy$node.label)){
             phy$node.label <- NULL
-            cat("You specified \'fixed.nodes=FALSE\' but included a phy object with node labels. These node labels have been removed.\n")
+            message("You specified \'fixed.nodes=FALSE\' but included a phy object with node labels. These node labels have been removed.\n")
         }
     }
 
@@ -105,7 +105,7 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
     #Some initial values for use later
     k <- 2
     if(upper.bound < lower.bound){
-      cat("Your upper bound is smaller than your lower bound.\n")
+        message("Your upper bound is smaller than your lower bound.\n")
     }
     lb <- log(lower.bound)
     ub <- log(upper.bound)
@@ -153,9 +153,9 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
       counts <- counts[-grep("&", names(counts))]
     }
     print_counts[as.numeric(names(counts))] <- counts
-    cat("State distribution in data:\n")
-    cat("States:",StateNames,"\n",sep="\t")
-    cat("Counts:",print_counts,"\n",sep="\t")
+    message("State distribution in data:\n")
+    message("States:",StateNames,"\n",sep="\t")
+    message("Counts:",print_counts,"\n",sep="\t")
     
     lower = rep(lb, model.set.final$np)
     upper = rep(ub, model.set.final$np)
@@ -222,7 +222,7 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
     opts <- list("algorithm"="NLOPT_LN_SBPLX", "maxeval"="1000000", "ftol_rel"=.Machine$double.eps^0.5)
   }
   if (!is.null(p)){
-        cat("Calculating likelihood from a set of fixed parameters", "\n")
+        message("Calculating likelihood from a set of fixed parameters", "\n")
         out <- NULL
         est.pars <- log(p)
         out$objective <- with(model.set.final,
@@ -246,7 +246,7 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
             ## If a user-specified starting value(s) is not supplied this begins loop through a set of randomly chosen starting values:
             ## Sets parameter settings for random restarts by taking the parsimony score and dividing
             ## by the total length of the tree
-            cat("Beginning thorough optimization search -- performing", nstarts, "random restarts", "\n")
+            message("Beginning thorough optimization search -- performing", nstarts, "random restarts", "\n")
             taxa.missing.data.drop <- which(is.na(data.sort[,1]))
             if(length(taxa.missing.data.drop) != 0){
                 tip.labs <- names(taxa.missing.data.drop)
@@ -342,7 +342,7 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
 			}
         }else{
             # the user has specified initial params
-            cat("Beginning subplex optimization routine -- Starting value(s):", ip, "\n")
+            message("Beginning subplex optimization routine -- Starting value(s):", ip, "\n")
             ip <- ip
 			if(set.fog == TRUE){
 				ip <- c(rep(0.01, length(unique(model.set.final$fog.vec))), ip)
@@ -372,7 +372,7 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
 
     #Starts the ancestral state reconstructions:
     if(node.states != "none") {
-        cat("Finished. Inferring ancestral states using", node.states, "reconstruction.","\n")
+        message("Finished. Inferring ancestral states using", node.states, "reconstruction.","\n")
     }
     TIPS <- 1:nb.tip
     if (node.states == "marginal" || node.states == "scaled"){
@@ -815,7 +815,7 @@ print.corhmm<-function(x,...){
     cat("\n")
 
 	if(!is.null(x$tip.fog.probs)){
-		cat("Tip fog\n")
+                cat("Tip fog\n")
 		print(x$tip.fog.probs)
 		cat("\n")
 	}
@@ -824,7 +824,7 @@ print.corhmm<-function(x,...){
         index.matrix <- x$index.mat
         #If any eigenvalue is less than 0 then the solution is not the maximum likelihood solution
         if (any(x$eigval<0)) {
-            cat("The objective function may be at a saddle point", "\n")
+            warning("The objective function may be at a saddle point", "\n")
         }
     }
     else{
