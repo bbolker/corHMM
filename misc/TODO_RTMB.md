@@ -24,6 +24,6 @@
 
 * `quiet` option
 * return devfun etc etc.? (see main branch of BMB fork)
-* priors?
+* priors? (tricky, they have to be built int
 * construct contrasts?
-* try HMC/`tmbstan` ...
+* try HMC/`tmbstan` ... [tried it, it's slow without priors!]
