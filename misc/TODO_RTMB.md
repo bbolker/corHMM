@@ -18,12 +18,12 @@
 * add code to corHMM that stores the log-likelihoods from *all* of the random starts? (This would be useful e.g. for figuring out whether multiple modes are really being found ...) [maybe BMB will do this?] 
     * if we had this we could take whatever summary we wanted of the distribution of log-likelihoods when we were summarizing results (min-max? standard dev? )
 
-* `use.fog` ? [seems hard]
+* `use.fog` ? test!
 
 ## miscellaneous
 
 * `quiet` option
 * return devfun etc etc.? (see main branch of BMB fork)
-* priors? (tricky, they have to be built int
+* priors? (tricky, they have to be built into the likelihood)
 * construct contrasts?
 * try HMC/`tmbstan` ... [tried it, it's slow without priors!]
