@@ -1,10 +1,21 @@
-## checking vs corHMM
+## new (porting formulas etc to corHMM)
+
+* port `formula_interface.R` code to corHMM
+* test `sym()` syntax (there are still `browser()` calls in the code!)
+* ? allow `..rateclass` (or whatever) in formulas
+* reverse-mapping functions? (i.e. going from Q parameters to beta, we can do this by inverting the X matrices with `solve()`) 
+   * i.e. `Q = X %*% beta` → `beta = Xinv %*% Q`
+* priors
+* check benchmarking results: why are additive models doing better (BMB) ?
+
+## old 
+
+### checking vs corHMM
 
 * `rate.cat` > 1 ?  (I think this should probably work, but I don't know if it actually does. Are there any examples in the documentation that use rate.cat > 1?)
   * go to one of the examples in misc/ratecat_ex_files.txt and try it with use_RTMB = TRUE and see if it breaks! and if not, if it gives (nearly) the same answer ...
   
 * when are differences in loglik more likely/bigger? when fit is worse, is it resolved by multi-start? is there a pattern to which parameters differ?
-
 
 * (small tweak) set things up so we can turn RTMB on and off with a global user option?
 
