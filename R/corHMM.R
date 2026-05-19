@@ -8,9 +8,14 @@ utils::globalVariables(c("liks", "Q"))
 ######################################################################################################################################
 ######################################################################################################################################
 
-corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.states = "marginal", fixed.nodes=FALSE, p=NULL, root.p="yang", tip.fog=NULL, ip=NULL, fog.ip = 0.01, nstarts=0, n.cores=1, get.tip.states = FALSE, lewis.asc.bias = FALSE, collapse=TRUE, lower.bound = 1e-9, upper.bound = 100, opts=NULL, return.devfun = FALSE, use_RTMB = FALSE) {
+corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.states = "marginal", fixed.nodes=FALSE, p=NULL, root.p="yang", tip.fog=NULL, ip=NULL, fog.ip = 0.01, nstarts=0, n.cores=1, get.tip.states = FALSE, lewis.asc.bias = FALSE, collapse=TRUE, lower.bound = 1e-9, upper.bound = 100, opts=NULL, return.devfun = FALSE, use_RTMB = FALSE, verbose=TRUE) {
 
     call <- match.call()
+	
+	input_rate_mat_states <- NULL
+	if(!is.null(rate.mat)) {
+		input_rate_mat_states <- colnames(rate.mat)
+	}
 
     # Checks to make sure node.states is not NULL.  If it is, just returns a diagnostic message asking for value.
     if(is.null(node.states)){
@@ -152,11 +157,14 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
     if(length(grep("&", names(counts))) > 0){
       counts <- counts[-grep("&", names(counts))]
     }
-    print_counts[as.numeric(names(counts))] <- counts
-    message("State distribution in data:\n")
-    message("States:",StateNames,"\n",sep="\t")
-    message("Counts:",print_counts,"\n",sep="\t")
-    
+	
+	if(verbose == TRUE){
+		print_counts[as.numeric(names(counts))] <- counts
+		message("State distribution in data:\n")
+		message("States:",StateNames,"\n",sep="\t")
+		message("Counts:",print_counts,"\n",sep="\t")
+    }
+	
     lower = rep(lb, model.set.final$np)
     upper = rep(ub, model.set.final$np)
     
@@ -222,7 +230,9 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
     opts <- list("algorithm"="NLOPT_LN_SBPLX", "maxeval"="1000000", "ftol_rel"=.Machine$double.eps^0.5)
   }
   if (!is.null(p)){
-        message("Calculating likelihood from a set of fixed parameters", "\n")
+        if(verbose == TRUE){
+			message("Calculating likelihood from a set of fixed parameters", "\n")
+		}
         out <- NULL
         est.pars <- log(p)
         out$objective <- with(model.set.final,
@@ -246,7 +256,9 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
             ## If a user-specified starting value(s) is not supplied this begins loop through a set of randomly chosen starting values:
             ## Sets parameter settings for random restarts by taking the parsimony score and dividing
             ## by the total length of the tree
-            message("Beginning thorough optimization search -- performing", nstarts, "random restarts", "\n")
+            if(verbose == TRUE){
+				message("Beginning thorough optimization search -- performing", nstarts, "random restarts", "\n")
+			}
             taxa.missing.data.drop <- which(is.na(data.sort[,1]))
             if(length(taxa.missing.data.drop) != 0){
                 tip.labs <- names(taxa.missing.data.drop)
@@ -342,7 +354,9 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
 			}
         }else{
             # the user has specified initial params
-            message("Beginning subplex optimization routine -- Starting value(s):", ip, "\n")
+			if(verbose == TRUE){
+				message("Beginning subplex optimization routine -- Starting value(s):", ip, "\n")
+			}
             ip <- ip
 			if(set.fog == TRUE){
 				ip <- c(rep(0.01, length(unique(model.set.final$fog.vec))), ip)
@@ -372,7 +386,9 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
 
     #Starts the ancestral state reconstructions:
     if(node.states != "none") {
-        message("Finished. Inferring ancestral states using", node.states, "reconstruction.","\n")
+		if(verbose == TRUE){
+			message("Finished. Inferring ancestral states using", node.states, "reconstruction.","\n")
+		}
     }
     TIPS <- 1:nb.tip
     if (node.states == "marginal" || node.states == "scaled"){
@@ -407,7 +423,7 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
     }
 	
     # StateNames <- paste("(", rep(1:(dim(model.set.final$index.matrix)[1]/rate.cat), rate.cat), ",", rep(paste("R", 1:rate.cat, sep = ""), each = nObs), ")", sep = "")
-    rownames(solution) <- colnames(solution) <- StateNames
+    try({rownames(solution) <- colnames(solution) <- StateNames})
 	if(set.fog == TRUE){
 		tip.fog.probs <- numeric(length(model.set.final$fog.vec))
 		tip.fog.probs[] <- c(fog.est, 0)[model.set.final$fog.vec]
@@ -422,8 +438,8 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
 	}
     if (is.character(node.states)) {
         if (node.states == "marginal" || node.states == "scaled"){
-            colnames(lik.anc$lik.anc.states) <- StateNames
-            colnames(tip.states) <- StateNames
+            try({colnames(lik.anc$lik.anc.states) <- StateNames})
+            try({colnames(tip.states) <- StateNames})
         }
     }
 
@@ -474,6 +490,9 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
     devfun = fun,
     opt.time = out$opt.time
   )
+  if(!is.null(input_rate_mat_states[1])) {
+	colnames(obj$solution) <- rownames(obj$solution) <- input_rate_mat_states
+  }
     class(obj)<-"corhmm"
     return(obj)
 }
@@ -794,44 +813,96 @@ corProcessData <- function(data, rate.mat=NULL, collapse=FALSE){
 }
 
 
-print.corhmm<-function(x,...){
+#' @export
+#print.corhmm <- function(x,...){
 
-    ntips=Ntip(x$phy)
-    output<-data.frame(x$loglik,x$AIC,x$AICc,x$rate.cat,ntips, row.names="")
-    names(output)<-c("lnL","AIC","AICc","Rate.cat","ntax")
-    cat("\nFit\n")
-    print(output)
-    cat("\n")
-    UserStates <- gsub("_", "|", corProcessData(x$data)$PossibleTraits)
-    ColNames <- paste0(colnames(x$data)[-1], collapse = "|")
+#  ntips=Ntip(x$phy)
+#  output<-data.frame(x$loglik,x$AIC,x$AICc,x$rate.cat,ntips, row.names="")
+#  names(output)<-c("lnL","AIC","AICc","Rate.cat","ntax")
+#  cat("\nFit\n")
+#  print(output)
+#  cat("\n")
+#  UserStates <- colnames(x$solution)
+#  ColNames <- paste0(colnames(x$data)[-1], collapse = "|")
+  
+#  cat("Legend\n")
+#  print(ColNames)
+#  print(UserStates)
+#  cat("\n")
+  
+#  param.est<- x$solution
+#  cat("Rates\n")
+#  print(param.est)
+#  cat("\n")
 
-    cat("Legend\n")
-    print(ColNames)
-    print(UserStates)
-    cat("\n")
+#	if(!is.null(x$tip.fog.probs)){
+#               cat("Tip fog\n")
+#		print(x$tip.fog.probs)
+#		cat("\n")
+#	}
+	
+#    if(any(x$eigval<0)){
+#        index.matrix <- x$index.mat
+        #If any eigenvalue is less than 0 then the solution is not the maximum likelihood solution
+#        if (any(x$eigval<0)) {
+#            warning("The objective function may be at a saddle point", "\n")
+#        }
+#    }
+#    else{
+#        cat("Arrived at a reliable solution","\n")
+#    }
+#}
 
-    param.est<- x$solution
-    cat("Rates\n")
-    print(param.est)
-    cat("\n")
+#' @export
+print.corhmm <- function(x,...){
+	if (!is.null(x$phy_list)){
+		ntips=Ntip(x$phy)
+		output<-data.frame(x$loglik,x$AIC,x$AICc,x$rate.cat,ntips,x$ntrees, row.names="")
+		names(output)<-c("lnL","AIC","AICc","Rate.cat","ntax","ntrees")
+		cat("\nFit\n")
+		print(output)
+		cat("\n")
+	} else {
+		ntips=Ntip(x$phy)
+		output<-data.frame(x$loglik,x$AIC,x$AICc,x$rate.cat,ntips, row.names="")
+		names(output)<-c("lnL","AIC","AICc","Rate.cat","ntax")
+		cat("\nFit\n")
+		print(output)
+		cat("\n")
+	}
+
+	UserStates <- gsub("_", "|", corHMM:::corProcessData(x$data)$PossibleTraits)
+	ColNames <- paste0(colnames(x$data)[-1], collapse = "|")
+
+	cat("Legend\n")
+	print(ColNames)
+	print(UserStates)
+	cat("\n")
+	
+	param.est<- x$solution
+	cat("Rates\n")
+	print(param.est)
+	cat("\n")
 
 	if(!is.null(x$tip.fog.probs)){
-                cat("Tip fog\n")
+		cat("Tip fog\n")
 		print(x$tip.fog.probs)
 		cat("\n")
 	}
 	
-    if(any(x$eigval<0)){
-        index.matrix <- x$index.mat
-        #If any eigenvalue is less than 0 then the solution is not the maximum likelihood solution
-        if (any(x$eigval<0)) {
-            warning("The objective function may be at a saddle point", "\n")
-        }
-    }
-    else{
-        cat("Arrived at a reliable solution","\n")
-    }
+	if(any(x$eigval<0)){
+		index.matrix <- x$index.mat
+		#If any eigenvalue is less than 0 then the solution is not the maximum likelihood solution
+		if (any(x$eigval<0)) {
+			cat("The objective function may be at a saddle point", "\n")
+		}
+	}
+	else{
+		cat("Arrived at a reliable solution","\n")
+	}
+
 }
+
 
 # function for calculating PIR according to gardner and organ (2021)
 getPIR <- function(phy, data, collapse){
