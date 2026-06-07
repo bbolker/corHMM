@@ -45,8 +45,7 @@ corHMMDredge <- function(phy, data, max.rate.cat=1, init.rate.cat=1,
     max_index_mat[max_index_mat == 0] <- NA
     max_index_mat_cp <- max_index_mat
   } else {
-    curr_index_mat <- getStateMat4Dat(data, collapse = FALSE, indep = FALSE)$rate.mat
-    max_index_mat <- curr_index_mat
+    max_index_mat <- index_mat
     max_index_mat[max_index_mat == 0] <- NA
     max_index_mat_cp <- max_index_mat
     curr_index_mat <- index_mat
