@@ -11,6 +11,29 @@ utils::globalVariables(c("liks", "Q"))
 corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.states = "marginal", fixed.nodes=FALSE, p=NULL, root.p="yang", tip.fog=NULL, ip=NULL, fog.ip = 0.01, nstarts=0, n.cores=1, get.tip.states = FALSE, lewis.asc.bias = FALSE, collapse=TRUE, lower.bound = 1e-9, upper.bound = 100, opts=NULL, return.devfun = FALSE, use_RTMB = FALSE, verbose=TRUE) {
 
     call <- match.call()
+
+    model_is_character <- is.character(model)
+
+    model_is_formula <- inherits(model, "formula") ||
+    (
+        is.list(model) &&
+        length(model) > 0L &&
+        all(vapply(model, inherits, logical(1), "formula"))
+    )
+
+    if (!model_is_character && !model_is_formula) {
+    stop(
+        "`model` must be either a character string or a formula/list of formulas.",
+        call. = FALSE
+    )
+    }
+
+    if (model_is_formula && !is.null(rate.mat)) {
+    stop(
+        "`rate.mat` cannot be used when `model` is a formula/list of formulas.",
+        call. = FALSE
+    )
+    }
 	
 	input_rate_mat_states <- NULL
 	if(!is.null(rate.mat)) {
@@ -58,6 +81,44 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
     }
 
     input.data <- data
+
+    model_is_character <- is.character(model)
+    model_is_formula <- is_formula_model(model)
+
+    if (!model_is_character && !model_is_formula) {
+    stop(
+        "`model` must be either a character string or a formula/list of formulas.",
+        call. = FALSE
+    )
+    }
+
+    if (model_is_formula) {
+    if (!is.null(rate.mat)) {
+        stop(
+        "`rate.mat` cannot be used when `model` is a formula/list of formulas.",
+        call. = FALSE
+        )
+    }
+
+    if (node.states != "none") {
+        stop(
+        "formula models currently require `node.states = 'none'.",
+        call. = FALSE
+        )
+    }
+
+    return(corHMM_formula(
+        phy = phy,
+        data = input.data,
+        model = model,
+        rate.cat = rate.cat,
+        root.p = root.p,
+        lower.bound = lower.bound,
+        upper.bound = upper.bound,
+        call = call,
+        verbose = verbose
+    ))
+    }
 
     nCol <- dim(data)[2]
 
@@ -124,6 +185,36 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
     root.p <- root.p
     nstarts <- nstarts
     ip <- ip
+    
+
+    if (model_is_formula) {
+        if (node.states != "none") {
+            stop("formula models currently require `node.states = 'none'`.",
+                call. = FALSE)
+        }
+
+        if (lewis.asc.bias) {
+            stop("formula models do not currently support `lewis.asc.bias = TRUE`.",
+                call. = FALSE)
+        }
+
+        if (!is.null(tip.fog)) {
+            stop("formula models do not currently support `tip.fog`.",
+                call. = FALSE)
+        }
+
+        return(corHMM_formula(
+            phy = phy,
+            data = input.data,
+            model = model,
+            rate.cat = rate.cat,
+            root.p = root.p,
+            lower.bound = lower.bound,
+            upper.bound = upper.bound,
+            call = call,
+            verbose = verbose
+        ))
+    }
     
     model.set.final <- rate.cat.set.corHMM.JDB(phy=phy, data=input.data, rate.cat=rate.cat, ntraits=nObs, model=model, rate.mat=rate.mat, collapse=collapse)
     phy <- reorder(phy, "pruningwise")
