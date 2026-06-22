@@ -1,5 +1,12 @@
 library(testthat)
-devtools::load_all()
+
+test_that(".parse_formula basics",
+          expect_identical(.parse_formula_spec(T1 ~ 1),
+                           list(trait = "T1", symmetric = FALSE,
+                                gain_formula = T1 ~ 1, 
+                                loss_formula = T1 ~ 1)))
+
+
 test_that("formula-model detector distinguishes character and formula models", {
   expect_false(is_formula_model("ARD"))
   expect_false(is_formula_model("SYM"))

@@ -1,3 +1,5 @@
+
+#' 'model' is a list of formulas
 is_formula_model <- function(model) {
   inherits(model, "formula") ||
     (
@@ -7,37 +9,32 @@ is_formula_model <- function(model) {
     )
 }
 
-.is_call <- function(x, name) {
-  is.call(x) && identical(as.character(x[[1]]), name)
-}
-
-.deparse_rhs <- function(x) {
-  paste(deparse(x), collapse = "")
-}
-
+#' @importFrom stats as.formula
 .formula_from_rhs <- function(lhs, rhs) {
-  stats::as.formula(
-    paste(lhs, "~", .deparse_rhs(rhs)),
-    env = parent.frame()
-  )
+  as.formula(bquote(.(lhs) ~ .(rhs)))
 }
 
+#' @export
+#' @noRd
+#' @keywords internal
+## FIXME: process by formula parsing, not by string processing
+## ? there's a lot unclear here about what's necessary ...
 .parse_formula_spec <- function(f) {
-  lhs <- as.character(f[[2]])
+  lhs <- f[[2]]
   rhs <- f[[3]]
 
-  if (.is_call(rhs, "symm")) {
+  if (!is.symbol(rhs) && identical(rhs[[1]], quote(symm))) {  ## identify symm()
     rhs2 <- rhs[[2]]
 
     return(list(
-      trait = lhs,
+      trait = deparse(lhs),
       symmetric = TRUE,
       gain_formula = .formula_from_rhs(lhs, rhs2),
       loss_formula = .formula_from_rhs(lhs, rhs2)
     ))
   }
 
-  if (.is_call(rhs, "list")) {
+  if (identical(rhs, quote(list))) {
     stop(
       "Different gain/loss formulas are not currently supported.",
       call. = FALSE
@@ -45,7 +42,7 @@ is_formula_model <- function(model) {
   }
 
   list(
-    trait = lhs,
+    trait = deparse(lhs),
     symmetric = FALSE,
     gain_formula = f,
     loss_formula = f
@@ -142,7 +139,7 @@ translate <- function(formula_list, nstate = 2) {
     X <- stats::model.matrix(rhs_terms, data = dat)
     n_col <- ncol(X)
 
-    if (isTRUE(spec$symmetric)) {
+    if (spec$symmetric) {
       shared_name <- paste0(tr, "_symm")
 
       if (is.null(shared_symm[[shared_name]])) {
