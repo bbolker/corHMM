@@ -10,17 +10,44 @@ namedList <- function (...)  {
     setNames(L, nm)
 }
 
-mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat, order.test, lewis.asc.bias, set.fog=FALSE, fog.vec, pen.type=NULL, lambda=1) {
+mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
+                              order.test, lewis.asc.bias,
+                              set.fog = FALSE, fog.vec = NULL,
+                              pen.type = NULL, lambda = 1,
+                              q_prep = NULL) {
   ## isolate computations that depend explicitly on p within the RTMB functions
   ## do as much computation as possible (i.e. computation that depends only on other components)
   ##   outside the core function; pass data to core function through tmb_data (not strictly necessary,
   ##   but helps with clarity/modularization)
   ## core function **cannot** contain any hard if() statements (e.g. various bits here that return
   ##  <very-large-number> if some 'bad' condition is met
+  formula_interface <- !is.null(q_prep)
+
+
+  if (lewis.asc.bias) {
+    stop("can't do lewis.asc.bias yet; recursive call to likelihood function ...")
+  }
+
+  if (order.test) {
+    stop("can't do order.test (non-differentiable ...)")
+  }
+
+  if (set.fog) {
+    warning("set.fog is untested in RTMB implementation", call. = FALSE)
+  }
+
+  if (formula_interface && set.fog) {
+    warning("tip.fog with the formula interface is untested.", call. = FALSE)
+  }
+
+  if (formula_interface && !is.null(pen.type)) {
+    warning("pen.type with the formula interface is untested.", call. = FALSE)
+  }
+
+  if (formula_interface && rate.cat != 1) {
+    stop("formula models currently require `rate.cat = 1`.", call. = FALSE)
+  }
   
-  if (lewis.asc.bias) stop("can't do lewis.asc.bias yet; recursive call to likelihood function ...")
-  if (order.test) stop("can't do order.test (non-differentiable ...)")
-  if (set.fog) warning("set.fog is untested in RTMB implementation")
   
   nb.node <- Nnode(phy)
   nb.tip <- Ntip(phy)
@@ -30,7 +57,7 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat, order.tes
   
   ## Pre-compute static penalty indices outside prune_fun (no AD tracing needed)
   ## These depend only on rate/rate.cat structure, not on p
-  pen_indices <- if (!is.null(pen.type) && rate.cat > 1) {
+  pen_indices <- if (!formula_interface && !is.null(pen.type) && rate.cat > 1) {
     rate_class_names <- paste0("R", 1:rate.cat)
     lapply(rate_class_names, function(rc) grep(rc, colnames(rate)))
   } else {
@@ -63,37 +90,61 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat, order.tes
     "c" <- RTMB::ADoverload("c")
     "diag<-" <- RTMB::ADoverload("diag<-")
     RTMB::getAll(pars, tmb_data)
-    p <- exp(p)
+
+    p_raw <- p
     cp_root.p <- root.p
     comp <- numeric(nb.tip + nb.node)
     
+    p_model <- p_raw
+
     if (set.fog) {
-      fog_pars    <- seq.int(length(unique(fog.vec)))
-      tip.fog.tmp <- p[fog_pars]
-      p           <- p[-fog_pars]
-      tip.fog     <- numeric(length(fog.vec))
-      tip.fog[]   <- c(tip.fog.tmp, 0)[fog.vec]
-      
+      fog_pars <- seq.int(length(unique(fog.vec)))
+
+      ## fog parameters are still on log scale and must be exponentiated
+      tip.fog.tmp <- exp(p_raw[fog_pars])
+
+      ## remaining parameters are either old log-rates or formula coefficients
+      p_model <- p_raw[-fog_pars]
+
+      tip.fog <- numeric(length(fog.vec))
+      tip.fog[] <- c(tip.fog.tmp, 0)[fog.vec]
+
       for (tip.index in seq(nb.tip)) {
         idx <- fog_idx[[tip.index]]
         if (length(idx$zeros) > 0) {
           if (rate.cat > 1) {
-            liks[tip.index, idx$ones] <- 1 - (sum(tip.fog[idx$not1]) / rate.cat)
+            liks[tip.index, idx$ones] <-
+              1 - (sum(tip.fog[idx$not1]) / rate.cat)
           } else {
-            liks[tip.index, idx$ones] <- 1 - sum(tip.fog[idx$not1])
+            liks[tip.index, idx$ones] <-
+              1 - sum(tip.fog[idx$not1])
           }
+
           liks[tip.index, idx$zeros] <- tip.fog[idx$zeros]
         }
       }
     }
     
-    np <- length(p)
-    Q <- rate
-    Q[Q <= np] <- p[Q[Q <= np]]
-    Q[rate == np + 1] <- 0
-    
-    for (i in 1:nrow(Q)) {
-      Q[i,i] <- -1 * sum(Q[i,])
+    if (formula_interface) {
+      ## p_model are formula coefficients; do not exponentiate here
+      Q <- build_Q_formula(p_model, q_prep)
+
+      ## only used for some penalty code below; formula penalty is warned as untested
+      p_rates <- exp(p_model)
+      np <- length(p_model)
+
+    } else {
+      ## old interface: p_model are log-rates
+      p_rates <- exp(p_model)
+      np <- length(p_rates)
+
+      Q <- rate
+      Q[Q <= np] <- p_rates[Q[Q <= np]]
+      Q[rate == np + 1] <- 0
+
+      for (i in seq_len(nrow(Q))) {
+        Q[i, i] <- -sum(Q[i, ])
+      }
     }
     
     ## ---------------------------------------------------------------
@@ -115,7 +166,7 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat, order.tes
           ## original: sd(p) if length(p)>1 else 0
           ## sd via mean-of-squared-deviations - differentiable
           if (np > 1) {
-            pen_score <- mean((p - mean(p))^2)    # variance (proportional to sd^2)
+            pen_score <- mean((p_rates - mean(p_rates))^2)
           }
           ## if np <= 1, pen_score stays 0
         }

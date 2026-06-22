@@ -89,7 +89,7 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
     stop(
         "`model` must be either a character string or a formula/list of formulas.",
         call. = FALSE
-    )
+        )
     }
 
     if (model_is_formula) {
@@ -103,6 +103,20 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
     if (node.states != "none") {
         stop(
         "formula models currently require `node.states = 'none'.",
+        call. = FALSE
+        )
+    }
+
+    if (!is.null(tip.fog)) {
+        stop(
+        "formula models do not currently support `tip.fog`.",
+        call. = FALSE
+        )
+    }
+
+    if (lewis.asc.bias) {
+        stop(
+        "formula models do not currently support `lewis.asc.bias = TRUE`.",
         call. = FALSE
         )
     }
