@@ -15,7 +15,7 @@ importFrom("graphics", "legend", "plot", "boxplot", "mtext", "segments", "stripc
 importFrom("stats", "median", "reorder", "rexp", "runif", "pgamma", "qgamma", "qunif", "sd")
 importFrom("MASS", "Null")
 importFrom("graphics", "par", "rect", "text")
-importFrom("stats", "na.exclude", "na.omit", "rmultinom", "coef", "deviance", "df", "logLik", "pchisq", "qunif", "dist", "optim", "setNames", "aggregate", "density", "quantile")
+importFrom("stats", "na.exclude", "na.omit", "rmultinom", "coef", "deviance", "df", "is.formula", "logLik", "pchisq", "qunif", "dist", "optim", "setNames", "aggregate", "density", "quantile")
 importFrom("lhs", "randomLHS")
 importFrom("utils", "tail")
 importFrom("graphics", "abline", "axis", "grid", "layout", "lines", "points", "polygon", "title")

@@ -44,14 +44,16 @@ test_that("corHMM rejects invalid model types", {
 })
 
 
+## FIXME: repeat data generation much less
+set.seed(1)
+phy <- ape::rtree(8)
+dat <- data.frame(
+  sp = phy$tip.label,
+  T1 = rep(c(0, 1), length.out = 8),
+  T2 = rep(c(0, 0, 1, 1), length.out = 8)
+)
+
 test_that("formula model rejects rate.mat", {
-  set.seed(1)
-  phy <- ape::rtree(8)
-  dat <- data.frame(
-    sp = phy$tip.label,
-    T1 = rep(c(0, 1), length.out = 8),
-    T2 = rep(c(0, 0, 1, 1), length.out = 8)
-  )
 
   rate.mat <- matrix(1, 4, 4)
   diag(rate.mat) <- 0
@@ -95,6 +97,7 @@ test_that("formula model currently requires node.states = 'none'", {
 
 
 test_that("formula model dispatches through the model argument", {
+  ## FIXME: is it important that this one is length 12 vs length 8 ?
   set.seed(1)
   phy <- ape::rtree(12)
   dat <- data.frame(
