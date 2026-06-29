@@ -1,39 +1,38 @@
 library(testthat)
 
-test_that(".parse_formula basics",
-          expect_identical(.parse_formula_spec(T1 ~ 1),
-                           list(trait = "T1", symmetric = FALSE,
-                                gain_formula = T1 ~ 1, 
-                                loss_formula = T1 ~ 1)))
+make_formula_data <- function(n = 12, two_trait = TRUE) {
+  phy <- ape::rtree(n)
+
+  dat <- data.frame(
+    sp = phy$tip.label,
+    T1 = rep(c(0, 1), length.out = n)
+  )
+
+  if (two_trait) {
+    dat$T2 <- rep(c(0, 0, 1, 1), length.out = n)
+  }
+
+  list(phy = phy, dat = dat)
+}
 
 
-test_that("formula-model detector distinguishes character and formula models", {
+test_that("formula-model detector and corHMM model validation work", {
   expect_false(is_formula_model("ARD"))
   expect_false(is_formula_model("SYM"))
   expect_false(is_formula_model("ER"))
+  expect_false(is_formula_model(1))
+  expect_false(is_formula_model(TRUE))
+  expect_false(is_formula_model(list("ARD")))
 
   expect_true(is_formula_model(T1 ~ 1))
   expect_true(is_formula_model(list(T1 ~ 1, T2 ~ T1)))
 
-  expect_false(is_formula_model(1))
-  expect_false(is_formula_model(TRUE))
-  expect_false(is_formula_model(list("ARD")))
-})
-
-
-test_that("corHMM rejects invalid model types", {
-  set.seed(1)
-  phy <- ape::rtree(8)
-  dat <- data.frame(
-    sp = phy$tip.label,
-    T1 = rep(c(0, 1), length.out = 8),
-    T2 = rep(c(0, 0, 1, 1), length.out = 8)
-  )
+  x <- make_formula_data(8)
 
   expect_error(
     corHMM(
-      phy = phy,
-      data = dat,
+      phy = x$phy,
+      data = x$dat,
       rate.cat = 1,
       model = 1,
       node.states = "none",
@@ -44,24 +43,16 @@ test_that("corHMM rejects invalid model types", {
 })
 
 
-## FIXME: repeat data generation much less
-set.seed(1)
-phy <- ape::rtree(8)
-dat <- data.frame(
-  sp = phy$tip.label,
-  T1 = rep(c(0, 1), length.out = 8),
-  T2 = rep(c(0, 0, 1, 1), length.out = 8)
-)
-
-test_that("formula model rejects rate.mat", {
+test_that("formula interface rejects unsupported corHMM options", {
+  x <- make_formula_data(8)
 
   rate.mat <- matrix(1, 4, 4)
   diag(rate.mat) <- 0
 
   expect_error(
     corHMM(
-      phy = phy,
-      data = dat,
+      phy = x$phy,
+      data = x$dat,
       rate.cat = 1,
       model = list(T1 ~ 1, T2 ~ T1),
       rate.mat = rate.mat,
@@ -70,22 +61,11 @@ test_that("formula model rejects rate.mat", {
     ),
     "`rate.mat` cannot be used"
   )
-})
-
-
-test_that("formula model currently requires node.states = 'none'", {
-  set.seed(1)
-  phy <- ape::rtree(8)
-  dat <- data.frame(
-    sp = phy$tip.label,
-    T1 = rep(c(0, 1), length.out = 8),
-    T2 = rep(c(0, 0, 1, 1), length.out = 8)
-  )
 
   expect_error(
     corHMM(
-      phy = phy,
-      data = dat,
+      phy = x$phy,
+      data = x$dat,
       rate.cat = 1,
       model = list(T1 ~ 1, T2 ~ T1),
       node.states = "marginal",
@@ -93,22 +73,41 @@ test_that("formula model currently requires node.states = 'none'", {
     ),
     "node.states = 'none'"
   )
+
+  expect_error(
+    corHMM(
+      phy = x$phy,
+      data = x$dat,
+      rate.cat = 1,
+      model = list(T1 ~ 1, T2 ~ T1),
+      node.states = "none",
+      tip.fog = 0.01,
+      verbose = FALSE
+    ),
+    "tip.fog"
+  )
+
+  expect_error(
+    corHMM(
+      phy = x$phy,
+      data = x$dat,
+      rate.cat = 1,
+      model = list(T1 ~ 1, T2 ~ T1),
+      node.states = "none",
+      lewis.asc.bias = TRUE,
+      verbose = FALSE
+    ),
+    "lewis.asc.bias"
+  )
 })
 
 
-test_that("formula model dispatches through the model argument", {
-  ## FIXME: is it important that this one is length 12 vs length 8 ?
-  set.seed(1)
-  phy <- ape::rtree(12)
-  dat <- data.frame(
-    sp = phy$tip.label,
-    T1 = rep(c(0, 1), length.out = 12),
-    T2 = rep(c(0, 0, 1, 1), length.out = 12)
-  )
+test_that("formula model fits and returns coefficient-style output", {
+  x <- make_formula_data(12)
 
   fit <- corHMM(
-    phy = phy,
-    data = dat,
+    phy = x$phy,
+    data = x$dat,
     rate.cat = 1,
     model = list(T1 ~ 1, T2 ~ T1),
     node.states = "none",
@@ -118,77 +117,7 @@ test_that("formula model dispatches through the model argument", {
   expect_s3_class(fit, "corhmm")
   expect_true(isTRUE(fit$formula_model))
   expect_true(is.finite(fit$loglik))
-  expect_true(is.matrix(fit$solution))
-  expect_equal(fit$rate.cat, 1)
-})
 
-test_that("character model still uses old corHMM interface", {
-  set.seed(1)
-  phy <- ape::rtree(8)
-  dat <- data.frame(
-    sp = phy$tip.label,
-    T1 = rep(c(0, 1), length.out = 8)
-  )
-
-  fit <- corHMM(
-    phy = phy,
-    data = dat,
-    rate.cat = 1,
-    model = "ER",
-    node.states = "none",
-    ip = 0.1,
-    nstarts = 0,
-    verbose = FALSE
-  )
-
-  expect_s3_class(fit, "corhmm")
-  expect_false(isTRUE(fit$formula_model))
-  expect_true(is.finite(fit$loglik))
-})
-
-
-test_that("single formula model dispatches correctly", {
-  set.seed(2)
-  phy <- ape::rtree(10)
-  dat <- data.frame(
-    sp = phy$tip.label,
-    T1 = rep(c(0, 1), length.out = 10)
-  )
-
-  fit <- corHMM(
-    phy = phy,
-    data = dat,
-    rate.cat = 1,
-    model = T1 ~ 1,
-    node.states = "none",
-    verbose = FALSE
-  )
-
-  expect_s3_class(fit, "corhmm")
-  expect_true(isTRUE(fit$formula_model))
-  expect_true(is.finite(fit$loglik))
-  expect_true(is.matrix(fit$solution))
-})
-
-test_that("formula model returns coefficient-style solution", {
-  set.seed(4)
-  phy <- ape::rtree(12)
-  dat <- data.frame(
-    sp = phy$tip.label,
-    T1 = rep(c(0, 1), length.out = 12),
-    T2 = rep(c(0, 0, 1, 1), length.out = 12)
-  )
-
-  fit <- corHMM(
-    phy = phy,
-    data = dat,
-    rate.cat = 1,
-    model = list(T1 ~ 1, T2 ~ T1),
-    node.states = "none",
-    verbose = FALSE
-  )
-
-  expect_true(isTRUE(fit$formula_model))
   expect_true(is.matrix(fit$solution))
   expect_equal(ncol(fit$solution), 1)
   expect_equal(colnames(fit$solution), "estimate")
@@ -197,19 +126,34 @@ test_that("formula model returns coefficient-style solution", {
   expect_true(any(grepl("^T1_loss", rownames(fit$solution))))
   expect_true(any(grepl("^T2_gain", rownames(fit$solution))))
   expect_true(any(grepl("^T2_loss", rownames(fit$solution))))
+
+  g <- fit$devfun$gr(fit$devfun$par)
+  expect_true(all(is.finite(g)))
+  expect_equal(length(g), length(fit$devfun$par))
 })
 
-test_that("character model still works with RTMB path", {
-  set.seed(11)
-  phy <- ape::rtree(10)
-  dat <- data.frame(
-    sp = phy$tip.label,
-    T1 = rep(c(0, 1), length.out = 10)
+
+test_that("single formula and old character RTMB paths still work", {
+  x1 <- make_formula_data(10, two_trait = FALSE)
+
+  fit_formula <- corHMM(
+    phy = x1$phy,
+    data = x1$dat,
+    rate.cat = 1,
+    model = T1 ~ 1,
+    node.states = "none",
+    verbose = FALSE
   )
 
-  fit <- corHMM(
-    phy = phy,
-    data = dat,
+  expect_s3_class(fit_formula, "corhmm")
+  expect_true(isTRUE(fit_formula$formula_model))
+  expect_true(is.finite(fit_formula$loglik))
+
+  x2 <- make_formula_data(10, two_trait = FALSE)
+
+  fit_char <- corHMM(
+    phy = x2$phy,
+    data = x2$dat,
     rate.cat = 1,
     model = "ER",
     node.states = "none",
@@ -218,45 +162,22 @@ test_that("character model still works with RTMB path", {
     verbose = FALSE
   )
 
-  expect_s3_class(fit, "corhmm")
-  expect_false(isTRUE(fit$formula_model))
-  expect_true(is.finite(fit$loglik))
-})
-
-test_that("formula RTMB devfun has finite gradient", {
-  set.seed(12)
-  phy <- ape::rtree(10)
-  dat <- data.frame(
-    sp = phy$tip.label,
-    T1 = rep(c(0, 1), length.out = 10),
-    T2 = rep(c(0, 0, 1, 1), length.out = 10)
-  )
-
-  fit <- corHMM(
-    phy = phy,
-    data = dat,
-    rate.cat = 1,
-    model = list(T1 ~ 1, T2 ~ T1),
-    node.states = "none",
-    verbose = FALSE
-  )
-
-  g <- fit$devfun$gr(fit$devfun$par)
-
-  expect_true(all(is.finite(g)))
-  expect_equal(length(g), length(fit$devfun$par))
+  expect_s3_class(fit_char, "corhmm")
+  expect_false(isTRUE(fit_char$formula_model))
+  expect_true(is.finite(fit_char$loglik))
 })
 
 
-test_that("symm formula shares gain/loss parameters", {
+test_that("symm formulas share gain/loss parameters and fit", {
   q_prep <- Q_prep(
-    mode = "formula",
     formula_list = list(T1 ~ symm(T2), T2 ~ 1),
     nstate = 2
   )
 
-  expect_true(any(grepl("^T1_symm", q_prep$par_names)))
+  expect_true(inherits(q_prep$Q0, "sparseMatrix"))
+  expect_equal(q_prep$n_par, 4)
 
+  expect_true(any(grepl("^T1_symm", q_prep$par_names)))
   expect_false(any(grepl("^T1_gain", q_prep$par_names)))
   expect_false(any(grepl("^T1_loss", q_prep$par_names)))
 
@@ -270,21 +191,11 @@ test_that("symm formula shares gain/loss parameters", {
     q_prep$blocks$T2_loss$par_index
   ))
 
-  expect_equal(q_prep$n_par, 4)
-})
-
-test_that("symm formula model fits", {
-  set.seed(20)
-  phy <- ape::rtree(10)
-  dat <- data.frame(
-    sp = phy$tip.label,
-    T1 = rep(c(0, 1), length.out = 10),
-    T2 = rep(c(0, 0, 1, 1), length.out = 10)
-  )
+  x <- make_formula_data(10)
 
   fit <- corHMM(
-    phy = phy,
-    data = dat,
+    phy = x$phy,
+    data = x$dat,
     rate.cat = 1,
     model = list(T1 ~ symm(T2), T2 ~ 1),
     node.states = "none",

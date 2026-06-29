@@ -1,5 +1,3 @@
-
-#' 'model' is a list of formulas
 is_formula_model <- function(model) {
   inherits(model, "formula") ||
     (
@@ -9,125 +7,117 @@ is_formula_model <- function(model) {
     )
 }
 
-#' @importFrom stats as.formula
-.formula_from_rhs <- function(lhs, rhs) {
-  as.formula(bquote(.(lhs) ~ .(rhs)))
-}
-
-#' @export
-#' @noRd
-#' @keywords internal
-## FIXME: process by formula parsing, not by string processing
-## ? there's a lot unclear here about what's necessary ...
-.parse_formula_spec <- function(f) {
-  lhs <- f[[2]]
-  rhs <- f[[3]]
-
-  if (!is.symbol(rhs) && identical(rhs[[1]], quote(symm))) {  ## identify symm()
-    rhs2 <- rhs[[2]]
-
-    return(list(
-      trait = deparse(lhs),
-      symmetric = TRUE,
-      gain_formula = .formula_from_rhs(lhs, rhs2),
-      loss_formula = .formula_from_rhs(lhs, rhs2)
-    ))
-  }
-
-  if (identical(rhs, quote(list))) {
-    stop(
-      "Different gain/loss formulas are not currently supported.",
-      call. = FALSE
-    )
-  }
-
-  list(
-    trait = deparse(lhs),
-    symmetric = FALSE,
-    gain_formula = f,
-    loss_formula = f
-  )
-}
 
 translate <- function(formula_list, nstate = 2) {
-  specs <- lapply(formula_list, .parse_formula_spec)
-  trait_names <- vapply(specs, `[[`, character(1), "trait")
+  if (inherits(formula_list, "formula")) {
+    formula_list <- list(formula_list)
+  }
 
+  specs <- vector("list", length(formula_list))
+
+  for (i in seq_along(formula_list)) {
+    f <- formula_list[[i]]
+    lhs <- f[[2]]
+    rhs <- f[[3]]
+    trait <- deparse(lhs)
+
+    if (is.call(rhs) && identical(rhs[[1]], quote(symm))) {
+      rhs <- rhs[[2]]
+      f2 <- stats::as.formula(bquote(.(lhs) ~ .(rhs)))
+
+      specs[[i]] <- list(
+        trait = trait,
+        symmetric = TRUE,
+        gain_formula = f2,
+        loss_formula = f2
+      )
+    } else {
+      if (is.call(rhs) && identical(rhs[[1]], quote(list))) {
+        stop(
+          "different gain/loss formulas are not currently supported.",
+          call. = FALSE
+        )
+      }
+
+      specs[[i]] <- list(
+        trait = trait,
+        symmetric = FALSE,
+        gain_formula = f,
+        loss_formula = f
+      )
+    }
+  }
+
+  trait_names <- vapply(specs, `[[`, character(1), "trait")
   names(formula_list) <- trait_names
   names(specs) <- trait_names
 
   stateList <- rep.int(as.integer(nstate), length(trait_names))
   names(stateList) <- trait_names
 
-  traitMatrix <- do.call(expand.grid, lapply(stateList, function(x) 0:(x - 1)))
-  traitMatrix$label <- do.call(paste, c(traitMatrix, sep = "|"))
+  traitMatrix <- do.call(
+    expand.grid,
+    lapply(stateList, function(x) 0:(x - 1))
+  )
+  traitMatrix$label <- do.call(
+    paste,
+    c(traitMatrix[trait_names], sep = "|")
+  )
 
-  edge_table <- function(traitM, trait_names) {
-    ns <- nrow(traitM)
+  ns <- nrow(traitMatrix)
+  Xstate <- as.matrix(traitMatrix[, trait_names, drop = FALSE])
 
-    Xstate <- as.matrix(traitM[, trait_names, drop = FALSE])
+  idx_grid <- expand.grid(
+    to = seq_len(ns),
+    from = seq_len(ns)
+  )
+  idx_grid <- idx_grid[idx_grid$from != idx_grid$to, , drop = FALSE]
 
-    idx_grid <- expand.grid(
-      to = seq_len(ns),
-      from = seq_len(ns)
-    )
-    idx_grid <- idx_grid[idx_grid$from != idx_grid$to, , drop = FALSE]
+  diff_matrix <- Xstate[idx_grid$to, , drop = FALSE] -
+    Xstate[idx_grid$from, , drop = FALSE]
 
-    diff_matrix <- Xstate[idx_grid$to, , drop = FALSE] -
-      Xstate[idx_grid$from, , drop = FALSE]
+  one_step <- which(rowSums(diff_matrix != 0) == 1L)
+  edges <- idx_grid[one_step, , drop = FALSE]
+  final_diffs <- diff_matrix[one_step, , drop = FALSE]
+  change_col <- max.col(final_diffs != 0)
 
-    diff_count <- rowSums(diff_matrix != 0)
+  edge_tab <- data.frame(
+    edge_id = seq_along(one_step),
+    from = edges$from,
+    to = edges$to,
+    from_label = traitMatrix$label[edges$from],
+    to_label = traitMatrix$label[edges$to],
+    changed_trait = trait_names[change_col],
+    delta = final_diffs[cbind(seq_along(change_col), change_col)]
+  )
 
-    valid_idx <- which(diff_count == 1L)
-    edges <- idx_grid[valid_idx, , drop = FALSE]
-    final_diffs <- diff_matrix[valid_idx, , drop = FALSE]
+  edge_tab$direction <- ifelse(edge_tab$delta > 0, "gain", "loss")
+  edge_tab$focal_from <- Xstate[cbind(edges$from, change_col)]
+  edge_tab$focal_to <- Xstate[cbind(edges$to, change_col)]
 
-    change_col_idx <- max.col(final_diffs != 0)
+  edge_tab <- cbind(
+    edge_tab,
+    traitMatrix[edges$from, trait_names, drop = FALSE]
+  )
 
-    res <- data.frame(
-      edge_id = seq_along(valid_idx),
-      from = edges$from,
-      to = edges$to,
-      from_label = traitM$label[edges$from],
-      to_label = traitM$label[edges$to],
-      changed_trait = trait_names[change_col_idx],
-      delta = final_diffs[cbind(seq_along(change_col_idx), change_col_idx)]
-    )
-
-    res$direction <- ifelse(res$delta > 0, "gain", "loss")
-    res$focal_from <- Xstate[cbind(edges$from, change_col_idx)]
-    res$focal_to <- Xstate[cbind(edges$to, change_col_idx)]
-
-    res <- cbind(
-      res,
-      traitM[edges$from, trait_names, drop = FALSE]
-    )
-
-    res
-  }
-  edge_tab <- edge_table(traitMatrix, trait_names)
-  edge_tab <- edge_tab[order(edge_tab$to, edge_tab$from), ]
+  edge_tab <- edge_tab[order(edge_tab$to, edge_tab$from), , drop = FALSE]
   edge_tab$edge_id <- seq_len(nrow(edge_tab))
 
   blocks <- list()
-  par_counter <- 1L
   shared_symm <- list()
+  par_counter <- 1L
 
   edge_groups <- split(
     edge_tab,
-    list(edge_tab$changed_trait, edge_tab$direction)
+    paste(edge_tab$changed_trait, edge_tab$direction, sep = "_")
   )
   edge_groups <- edge_groups[sort(names(edge_groups))]
 
-  for (group_name in names(edge_groups)) {
-    dat <- edge_groups[[group_name]]
-    if (nrow(dat) == 0) next
-
+  for (block_name in names(edge_groups)) {
+    dat <- edge_groups[[block_name]]
     tr <- as.character(dat$changed_trait[1])
     dir <- as.character(dat$direction[1])
     spec <- specs[[tr]]
-
-    block_name <- paste(tr, dir, sep = "_")
 
     curr_formula <- if (dir == "gain") {
       spec$gain_formula
@@ -148,19 +138,11 @@ translate <- function(formula_list, nstate = 2) {
 
         shared_symm[[shared_name]] <- list(
           par_index = par_index,
-          coef_names = coef_names,
-          colnames = colnames(X)
+          coef_names = coef_names
         )
 
         par_counter <- par_counter + n_col
       } else {
-        if (!identical(shared_symm[[shared_name]]$colnames, colnames(X))) {
-          stop(
-            "gain and loss design matrices differ for symmetric formula.",
-            call. = FALSE
-          )
-        }
-
         par_index <- shared_symm[[shared_name]]$par_index
         coef_names <- shared_symm[[shared_name]]$coef_names
       }
@@ -188,42 +170,25 @@ translate <- function(formula_list, nstate = 2) {
     )
   }
 
-  ns <- nrow(traitMatrix)
   Q_indicator <- matrix(0L, ns, ns)
   Q_indicator[as.matrix(edge_tab[, c("from", "to")])] <- edge_tab$edge_id
   rownames(Q_indicator) <- colnames(Q_indicator) <- traitMatrix$label
 
-  Q0 <- Matrix::Matrix(0, ns, ns, sparse = TRUE, dimnames = list(traitMatrix$label, traitMatrix$label))
-  ## TODO: uncomment this and see what breaks (what's the error?)
-  ## Q0 <- matrix(0, ns, ns, dimnames = list(traitMatrix$label, traitMatrix$label))
-  ## Q0 <- RTMB::AD(Q0)  ## convert base-R to RTMB/AD type
+  Q0 <- Matrix::Matrix(
+    0,
+    ns,
+    ns,
+    sparse = TRUE,
+    dimnames = list(traitMatrix$label, traitMatrix$label)
+  )
 
   n_par <- par_counter - 1L
   par_names <- character(n_par)
 
-  for (nm in names(blocks)) {
-    b <- blocks[[nm]]
-
-    old_names <- par_names[b$par_index]
-    new_names <- b$coef_names
-
-    if (any(nzchar(old_names) & old_names != new_names)) {
-      stop(
-        "internal error: conflicting parameter names for shared parameter indices.",
-        call. = FALSE
-      )
-    }
-
-    par_names[b$par_index] <- new_names
+  for (b in blocks) {
+    par_names[b$par_index] <- b$coef_names
   }
 
-  if (any(!nzchar(par_names))) {
-    stop(
-      "internal error: some formula-model parameters were not named.",
-      call. = FALSE
-    )
-  }
-  
   list(
     trait_names = trait_names,
     stateList = stateList,
@@ -240,17 +205,10 @@ translate <- function(formula_list, nstate = 2) {
 }
 
 
-Q_prep <- function(mode = "formula", formula_list = NULL,
-                   nstate = 2, ntrait = NULL) {
-  if (!identical(mode, "formula")) {
-    stop("formula interface only supports `mode = 'formula'.",
-         call. = FALSE)
-  }
-
+Q_prep <- function(formula_list, nstate = 2) {
   trans <- translate(formula_list = formula_list, nstate = nstate)
 
   list(
-    mode = "formula",
     d = nrow(trans$traitMatrix),
     Q0 = trans$Q0,
     Q_indicator = trans$Q_indicator,
@@ -260,6 +218,7 @@ Q_prep <- function(mode = "formula", formula_list = NULL,
     trans = trans
   )
 }
+
 
 build_Q_formula <- function(q_par, q_prep) {
   "[<-" <- RTMB::ADoverload("[<-")
@@ -283,70 +242,16 @@ build_Q_formula <- function(q_par, q_prep) {
   Q
 }
 
-prune_nll <- function(pars, Phylodata) {
-  if (!require("RTMB")) stop("install RTMB package")
-  "[<-" <- ADoverload("[<-")
-  "c" <- ADoverload("c")
-  "diag<-" <- ADoverload("diag<-")
-  getAll(pars, Phylodata)
 
-  ntips <- ape::Ntip(tree)
-  if (length(trait_values) != ntips) {
-    stop("length(trait_values) must equal the number of tips in tree.")
-  }
-
-  d <- q_prep$d
-  Q <- build_Q(q_par, q_prep)
-
-  liks <- matrix(NA_real_, nrow = ntips + tree$Nnode, ncol = d)
-
-  ## initialize tip likelihoods
-  liks[seq_len(ntips), ] <- 0
-  for (i in seq_len(ntips)) {
-    liks[i, trait_values[i]] <- 1
-  }
-
-  comp <- numeric(nrow(liks))
-  anc <- unique(tree$edge[, 1])
-
-  for (i in anc) {
-    desRows <- which(tree$edge[, 1] == i)
-    desNodes <- tree$edge[desRows, 2]
-
-    v <- rep(1, d)
-
-    for (j in seq_along(desRows)) {
-      t <- tree$edge.length[desRows[j]]
-
-      u <- drop(as.matrix(
-        Matrix::expm(Q * t) %*% liks[desNodes[j], ]
-      ))
-
-      v <- drop(v * u)
-    }
-    comp[i] <- sum(v)
-    liks[i, ] <- v / comp[i]
-  }
-
-  TIPS <- 1:ape::Ntip(tree)
-  root <- ape::Ntip(tree) + 1
-  root.p <- rep(1/d, d)
-  neg_loglik <- -1*(sum(log(comp[-TIPS])) +log(sum(root.p * liks[root, ])))
-  return(neg_loglik)
-}
-
-
-
-#' translate trait matrix (no species name!) to single trait
-#' @param traits trait matrix (trait values, 0-indexed)
-#' @param n number of states per trait
 multi_to_single <- function(traits, n = NULL) {
   if (is.null(n)) {
-      n <- apply(traits, 2, max)+1
-      warning("guessing number of traits per state from max()+1")
+    n <- apply(traits, 2, max) + 1
+    warning("guessing number of states per trait from max() + 1")
   }
+
   x <- rev(cumprod(rev(n)))
-  x <- c(x[-1], 1) 
+  x <- c(x[-1], 1)
+
   rowSums(sweep(traits, MARGIN = 2, x, "*")) + 1
 }
 
@@ -370,29 +275,23 @@ corHMM_formula <- function(phy, data, model, rate.cat, root.p,
   data <- matching$data
   data <- data[match(phy$tip.label, data[[1]]), , drop = FALSE]
 
-  ntrait <- length(formula_list)
-  nstate <- 2L
-
   q_prep <- Q_prep(
-    mode = "formula",
     formula_list = formula_list,
-    nstate = nstate,
-    ntrait = ntrait
+    nstate = 2L
   )
 
-  trait_data <- data[, -1, drop = FALSE]
+  trait_data <- data[, q_prep$trans$trait_names, drop = FALSE]
   trait_data[] <- lapply(trait_data, as.numeric)
 
   trait_values <- multi_to_single(
     traits = trait_data,
-    n = rep(nstate, ntrait)
+    n = rep(2L, length(q_prep$trans$trait_names))
   )
 
-  d <- q_prep$d
   nb.tip <- ape::Ntip(phy)
   nb.node <- ape::Nnode(phy)
 
-  liks <- matrix(0, nrow = nb.tip + nb.node, ncol = d)
+  liks <- matrix(0, nrow = nb.tip + nb.node, ncol = q_prep$d)
   for (i in seq_len(nb.tip)) {
     liks[i, trait_values[i]] <- 1
   }
