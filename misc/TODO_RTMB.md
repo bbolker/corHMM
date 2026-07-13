@@ -1,4 +1,13 @@
-## new (porting formulas etc to corHMM)
+## new
+
+* we want everything (as much as possible) to run through a *single* code path
+    * it's OK if the formula interface only works with RTMB
+	* priors should ideally work with both base-corHMM and RTMB-corHMM, but it's OK if they only work with RTMB
+	* `nlminb` should *only be called once*: don't duplicate any code you don't have to
+	* HMC code can only work with RTMB backend (but should be able to work with or without formula interface)
+
+
+## old (porting formulas etc to corHMM)
 
 * port `formula_interface.R` code to corHMM
 * test `sym()` syntax (there are still `browser()` calls in the code!)
