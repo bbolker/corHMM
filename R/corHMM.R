@@ -8,7 +8,7 @@ utils::globalVariables(c("liks", "Q"))
 ######################################################################################################################################
 ######################################################################################################################################
 
-corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.states = "marginal", fixed.nodes=FALSE, p=NULL, root.p="yang", tip.fog=NULL, ip=NULL, fog.ip = 0.01, nstarts=0, n.cores=1, get.tip.states = FALSE, lewis.asc.bias = FALSE, collapse=TRUE, lower.bound = 1e-9, upper.bound = 100, opts=NULL, return.devfun = FALSE, use_RTMB = FALSE, verbose=TRUE) {
+corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.states = "marginal", fixed.nodes=FALSE, p=NULL, root.p="yang", tip.fog=NULL, ip=NULL, fog.ip = 0.01, nstarts=0, n.cores=1, get.tip.states = FALSE, lewis.asc.bias = FALSE, collapse=TRUE, lower.bound = 1e-9, upper.bound = 100, opts=NULL, return.devfun = FALSE, use_RTMB = FALSE, prior = NULL, mcmc = NULL, verbose=TRUE) {
 
     call <- match.call()
 	
@@ -76,6 +76,13 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
             )
         }
 
+        if (rate.cat != 1) {
+            stop(
+                "formula models currently require `rate.cat = 1`.",
+                call. = FALSE
+            )
+        }
+
         if (node.states != "none") {
             stop(
                 "formula models currently require `node.states = 'none'.",
@@ -97,17 +104,214 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD", node.state
             )
         }
 
-        return(corHMM_formula(
+        if (!is.null(prior)) {
+            if (is.null(prior$lb)) prior$lb <- log(lower.bound)
+            if (is.null(prior$ub)) prior$ub <- log(upper.bound)
+            if (is.null(prior$range)) prior$range <- 3
+            if (is.null(prior$coef.sd)) prior$coef.sd <- 2
+        }
+
+        formula_list <- if (inherits(model, "formula")) list(model) else model
+
+        matching <- match.tree.data(phy, input.data)
+        phy <- ape::reorder.phylo(matching$phy, "pruningwise")
+        data <- matching$data
+        data <- data[match(phy$tip.label, data[[1]]), , drop = FALSE]
+
+        if (any(phy$edge.length <= .Machine$double.eps)) {
+            warning(
+                paste0(
+                    "Branch lengths of 0 detected. Adding ",
+                    sqrt(.Machine$double.eps)
+                ),
+                immediate. = TRUE
+            )
+            phy$edge.length <- phy$edge.length + sqrt(.Machine$double.eps)
+        }
+
+        q_prep <- Q_prep(
+            formula_list = formula_list,
+            nstate = 2L
+        )
+
+        trait_data <- data[, q_prep$trans$trait_names, drop = FALSE]
+        trait_data[] <- lapply(trait_data, as.numeric)
+
+        trait_values <- multi_to_single(
+            traits = trait_data,
+            n = rep(2L, length(q_prep$trans$trait_names))
+        )
+
+        nb.tip <- ape::Ntip(phy)
+        nb.node <- ape::Nnode(phy)
+
+        liks <- matrix(0, nb.tip + nb.node, q_prep$d)
+        for (i in seq_len(nb.tip)) {
+            liks[i, trait_values[i]] <- 1
+        }
+
+        pars <- setNames(
+            rep(log(0.1), q_prep$n_par),
+            q_prep$par_names
+        )
+
+        RTMB_obj <- mkdev.corhmm_rtmb(
+            p = pars,
             phy = phy,
-            data = input.data,
-            model = model,
-            rate.cat = rate.cat,
+            liks = liks,
+            Q = q_prep$Q0,
+            rate = NULL,
             root.p = root.p,
-            lower.bound = lower.bound,
-            upper.bound = upper.bound,
+            rate.cat = rate.cat,
+            order.test = FALSE,
+            lewis.asc.bias = FALSE,
+            q_prep = q_prep,
+            prior = prior
+        )
+
+        lower <- rep(log(lower.bound), length(pars))
+        upper <- rep(log(upper.bound), length(pars))
+
+        opt.time <- system.time({
+            if (is.null(p)) {
+                out <- nlminb(
+                    start = pars,
+                    objective = RTMB_obj$fn,
+                    gradient = RTMB_obj$gr,
+                    lower = lower,
+                    upper = upper
+                )
+                est.pars <- out$par
+            } else {
+                est.pars <- as.numeric(p)
+                names(est.pars) <- q_prep$par_names
+                out <- list(
+                    par = est.pars,
+                    objective = RTMB_obj$fn(est.pars),
+                    iterations = 0,
+                    convergence = 0,
+                    message = "fixed parameters"
+                )
+            }
+        })
+
+        names(est.pars) <- q_prep$par_names
+
+        if (is.null(prior)) {
+            loglik <- -as.numeric(out$objective)
+            logpost <- NA_real_
+            k <- length(est.pars)
+            AIC <- -2 * loglik + 2 * k
+            AICc <- -2 * loglik + 2 * k * (nb.tip / (nb.tip - k - 1))
+        } else {
+            likelihood_obj <- mkdev.corhmm_rtmb(
+                p = pars,
+                phy = phy,
+                liks = liks,
+                Q = q_prep$Q0,
+                rate = NULL,
+                root.p = root.p,
+                rate.cat = rate.cat,
+                order.test = FALSE,
+                lewis.asc.bias = FALSE,
+                q_prep = q_prep,
+                prior = NULL
+            )
+
+            loglik <- -as.numeric(likelihood_obj$fn(est.pars))
+            logpost <- -as.numeric(out$objective)
+            AIC <- NA_real_
+            AICc <- NA_real_
+        }
+
+        mcmc.fit <- NULL
+
+        if (!is.null(mcmc)) {
+            if (is.null(prior)) {
+                stop("HMC requires priors.", call. = FALSE)
+            }
+
+            if (is.null(mcmc$chains)) mcmc$chains <- 4
+            if (is.null(mcmc$iter)) mcmc$iter <- 2000
+            if (is.null(mcmc$warmup)) mcmc$warmup <- mcmc$iter / 2
+            if (is.null(mcmc$seed)) mcmc$seed <- 427
+            if (is.null(mcmc$cores)) mcmc$cores <- mcmc$chains
+            if (is.null(mcmc$open_progress)) mcmc$open_progress <- FALSE
+            if (is.null(mcmc$control)) {
+                mcmc$control <- list(
+                    adapt_delta = 0.9,
+                    max_treedepth = 12
+                )
+            }
+
+            mcmc.fit <- tmbstan::tmbstan(
+                RTMB_obj,
+                chains = mcmc$chains,
+                cores = mcmc$cores,
+                iter = mcmc$iter,
+                warmup = mcmc$warmup,
+                seed = mcmc$seed,
+                init = "last.par.best",
+                open_progress = mcmc$open_progress,
+                control = mcmc$control
+            )
+        }
+
+        solution <- matrix(est.pars, ncol = 1)
+        rownames(solution) <- names(est.pars)
+        colnames(solution) <- "estimate"
+
+        if (!return.devfun) {
+            fun <- NA
+        } else {
+            fun <- function(...) RTMB_obj
+        }
+
+        obj <- list(
+            loglik = loglik,
+            logpost = logpost,
+            AIC = AIC,
+            AICc = AICc,
+            rate.cat = rate.cat,
+            solution = solution,
+            tip.fog.probs = NULL,
+            index.mat = q_prep$Q_indicator,
+            fog.vec = NULL,
+            data = input.data,
+            data.legend = data,
+            phy = phy,
+            states = NA,
+            tip.states = NA,
+            states.info = NA,
+            iterations = out$iterations,
+            convergence = out$convergence,
+            message = out$message,
+            collapse = collapse,
+            root.p = root.p,
+            args.list = list(
+                phy = phy,
+                data = data,
+                model = model,
+                q_prep = q_prep,
+                trait_values = trait_values,
+                p = est.pars
+            ),
             call = call,
-            verbose = verbose
-        ))
+            devfun = fun,
+            opt.time = opt.time,
+            formula_model = TRUE,
+            formula_list = formula_list,
+            q_prep = q_prep,
+            prior = prior,
+            mcmc = mcmc.fit
+        )
+
+        class(obj) <- "corhmm"
+        return(obj)
+    }
+
+    if (!is.null(prior) || !is.null(mcmc)) {
+        stop("`prior` and `mcmc` currently require a formula model.", call. = FALSE)
     }
 
     nCol <- dim(data)[2]
@@ -907,6 +1111,17 @@ corProcessData <- function(data, rate.mat=NULL, collapse=FALSE){
 
 #' @export
 print.corhmm <- function(x,...){
+    if (isTRUE(x$formula_model)) {
+        ntips <- Ntip(x$phy)
+        output <- data.frame(x$loglik, x$AIC, x$AICc, x$rate.cat, ntips, row.names = "")
+        names(output) <- c("lnL", "AIC", "AICc", "Rate.cat", "ntax")
+        cat("\nFit\n")
+        print(output)
+        cat("\nFormula coefficients\n")
+        print(x$solution)
+        cat("\n")
+        return(invisible(x))
+    }
 	if (!is.null(x$phy_list)){
 		ntips=Ntip(x$phy)
 		output<-data.frame(x$loglik,x$AIC,x$AICc,x$rate.cat,ntips,x$ntrees, row.names="")
