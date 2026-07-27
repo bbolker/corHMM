@@ -1,5 +1,6 @@
 test_that("RTMB is wired through one construction and one nlminb call", {
   cor_symbols <- all.names(body(corHMM), functions = TRUE)
+  ## not allowed to have :::; we could export the function if we wanted ...  
   rtmb_symbols <- all.names(body(corHMM:::mkdev.corhmm_rtmb), functions = TRUE)
 
   expect_equal(sum(cor_symbols == "mkdev.corhmm_rtmb"), 1)

@@ -143,7 +143,7 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD",
         lower <- rep(lb, model.set.final$np)
         upper <- rep(ub, model.set.final$np)
 
-        if(verbose == TRUE){
+        if (verbose) {
             message("State distribution in data:\n")
             message("States:", StateNames, "\n", sep="\t")
             message("Counts:", as.integer(counts), "\n", sep="\t")
@@ -364,7 +364,13 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD",
             }
             if(use_RTMB) names(start) <- names(RTMB_obj$par)
 
-            if(use_RTMB){
+            ## FIXME: should we use nloptr for both types, to unify?
+            ## (nlminb is more common for RTMB fits; the current default
+            ## for nloptr is the NLOPT_LN_SBPLX algorithm, which is gradient-free)
+            ## Also: traditional use of nloptr() can pass additional arguments through to the objective function,
+            ## while RTMB requires that all auxiliary quantities be compiled into the TMB object at
+            ## MakeADFun() call ...
+            if (use_RTMB) {
                 stats::nlminb(
                     start,
                     RTMB_obj$fn,
@@ -433,6 +439,11 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD",
 
     mcmc.fit <- NULL
     if(!is.null(mcmc)){
+        ## FIXME: we can streamline this a bit by having an mcmcControl() function that
+        ## implements/documents default values ... shouldn't be hard-coded
+        ## (compare lmerControl, glmerControl in the lme4 package, although these have
+        ## some more complicated stuff in them that we don't need - or glmmTMBControl::glmmTMBControl()
+        ## (probably simpler)
         if(is.null(mcmc$chains)) mcmc$chains <- 4
         if(is.null(mcmc$iter)) mcmc$iter <- 2000
         if(is.null(mcmc$warmup)) mcmc$warmup <- mcmc$iter/2
