@@ -1,13 +1,3 @@
-is_formula_model <- function(model) {
-  inherits(model, "formula") ||
-    (
-      is.list(model) &&
-        length(model) > 0L &&
-        all(vapply(model, inherits, logical(1), "formula"))
-    )
-}
-
-
 translate <- function(formula_list, nstate = 2) {
   if (inherits(formula_list, "formula")) {
     formula_list <- list(formula_list)
@@ -133,7 +123,7 @@ translate <- function(formula_list, nstate = 2) {
       shared_name <- paste0(tr, "_symm")
 
       if (is.null(shared_symm[[shared_name]])) {
-        par_index <- seq(par_counter, length.out = n_col)
+        par_index <- par_counter + seq_len(n_col) - 1L
         coef_names <- paste0(shared_name, ":", colnames(X))
 
         shared_symm[[shared_name]] <- list(
@@ -147,7 +137,7 @@ translate <- function(formula_list, nstate = 2) {
         coef_names <- shared_symm[[shared_name]]$coef_names
       }
     } else {
-      par_index <- seq(par_counter, length.out = n_col)
+      par_index <- par_counter + seq_len(n_col) - 1L
       coef_names <- paste0(block_name, ":", colnames(X))
       par_counter <- par_counter + n_col
     }
@@ -190,6 +180,7 @@ translate <- function(formula_list, nstate = 2) {
   }
 
   list(
+    d = ns,
     trait_names = trait_names,
     stateList = stateList,
     formulas = formula_list,
@@ -205,82 +196,22 @@ translate <- function(formula_list, nstate = 2) {
 }
 
 
-Q_prep <- function(formula_list, nstate = 2) {
-  trans <- translate(formula_list = formula_list, nstate = nstate)
-
-  list(
-    d = nrow(trans$traitMatrix),
-    Q0 = trans$Q0,
-    Q_indicator = trans$Q_indicator,
-    n_par = trans$n_par,
-    par_names = trans$par_names,
-    blocks = trans$blocks,
-    trans = trans
-  )
-}
-
-
-build_Q_formula <- function(q_par, q_prep) {
-  "[<-" <- RTMB::ADoverload("[<-")
-
-  Q <- as.matrix(q_prep$Q0)
-
-  for (nm in names(q_prep$blocks)) {
-    b <- q_prep$blocks[[nm]]
-
-    beta_block <- q_par[b$par_index]
-    eta_block <- drop(b$X %*% beta_block)
-    rate_block <- exp(eta_block)
-
-    Q[cbind(b$from, b$to)] <- rate_block
-  }
-
-  for (i in seq_len(nrow(Q))) {
-    Q[i, i] <- -sum(Q[i, ])
-  }
-
-  Q
-}
-
-
-multi_to_single <- function(traits, n = NULL) {
-  if (is.null(n)) {
-    n <- apply(traits, 2, max) + 1
-    warning("guessing number of states per trait from max() + 1")
-  }
-
-  x <- rev(cumprod(rev(n)))
-  x <- c(x[-1], 1)
-
-  rowSums(sweep(traits, MARGIN = 2, x, "*")) + 1
-}
-
-
-## utility function, copied from lme4
-## unnamed elements of ... will be given names from deparse()
-namedList <- function (...)  {
-    L <- list(...)
-    snm <- sapply(substitute(list(...)), deparse)[-1]
-    if (is.null(nm <- names(L)))
-        nm <- snm
-    if (any(nonames <- nm == ""))
-        nm[nonames] <- snm[nonames]
-    setNames(L, nm)
-}
-
-
 mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
                               order.test, lewis.asc.bias,
                               set.fog = FALSE, fog.vec = NULL,
                               pen.type = NULL, lambda = 1,
                               q_prep = NULL, prior = NULL) {
-  ## isolate computations that depend explicitly on p within the RTMB functions
-  ## do as much computation as possible (i.e. computation that depends only on other components)
-  ## outside the core function; pass data to core function through tmb_data (not strictly necessary,
-  ## but helps with clarity/modularization)
-  ## core function **cannot** contain any hard if() statements (e.g. various bits here that return
-  ## <very-large-number> if some 'bad' condition is met
   formula_interface <- !is.null(q_prep)
+  n_fog <- if (set.fog) length(unique(fog.vec)) else 0L
+
+  names(p) <- c(
+    if (n_fog) paste0("fog", seq_len(n_fog)),
+    if (formula_interface) {
+      q_prep$par_names
+    } else {
+      paste0("rate", seq_len(length(p) - n_fog))
+    }
+  )
 
   if (lewis.asc.bias) {
     stop("can't do lewis.asc.bias yet; recursive call to likelihood function ...")
@@ -312,8 +243,6 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
   anc <- unique(phy$edge[,1])
   k.rates <- dim(Q)[2] / 2
 
-  ## Pre-compute static penalty indices outside prune_fun (no AD tracing needed)
-  ## These depend only on rate/rate.cat structure, not on p
   pen_indices <- if (!formula_interface && !is.null(pen.type) && rate.cat > 1) {
     rate_class_names <- paste0("R", 1:rate.cat)
     lapply(rate_class_names, function(rc) grep(rc, colnames(rate)))
@@ -321,13 +250,8 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
     NULL
   }
 
-  ## off-diagonal indices for Q (static structure): used by penalty
-  ## We need to know which Q entries are off-diagonal non-zero to compute means
-  ## These are positions where rate[] value is <= np (i.e., a real parameter)
-  ## We pre-compute this mask outside AD
   nq <- nrow(Q)
 
-  ## precompute fog application indices outside prune_fun (static, no AD)
   fog_idx <- if (set.fog) {
     lapply(seq_len(nb.tip), function(tip.index) {
       list(
@@ -354,19 +278,53 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
     }
   }
 
-  tmb_data <- namedList(
-    nb.node, nb.tip, TIPS, anc, k.rates, nq, fog_idx,
-    prior.mean, prior.sd, coef.sd, intercept_idx, slope_idx
+  if (is.null(root.p)) {
+    adjacency <- if (formula_interface) {
+      q_prep$Q_indicator > 0
+    } else {
+      rate < max(rate)
+    }
+    diag(adjacency) <- FALSE
+    active <- rowSums(adjacency) + colSums(adjacency) > 0
+    root.p <- as.numeric(active) / sum(active)
+  }
+
+  model_data <- list(
+    phy = phy,
+    liks = liks,
+    Q = Q,
+    rate = rate,
+    root.p = root.p,
+    rate.cat = rate.cat,
+    set.fog = set.fog,
+    fog.vec = fog.vec,
+    pen.type = pen.type,
+    lambda = lambda,
+    q_prep = q_prep,
+    prior = prior,
+    formula_interface = formula_interface,
+    nb.node = nb.node,
+    nb.tip = nb.tip,
+    TIPS = TIPS,
+    anc = anc,
+    k.rates = k.rates,
+    nq = nq,
+    pen_indices = pen_indices,
+    fog_idx = fog_idx,
+    prior.mean = prior.mean,
+    prior.sd = prior.sd,
+    coef.sd = coef.sd,
+    intercept_idx = intercept_idx,
+    slope_idx = slope_idx
   )
 
-  prune_fun <- function(pars) {
+  prune_nll <- function(pars) {
     "[<-" <- RTMB::ADoverload("[<-")
     "c" <- RTMB::ADoverload("c")
     "diag<-" <- RTMB::ADoverload("diag<-")
-    RTMB::getAll(pars, tmb_data)
+    RTMB::getAll(pars, model_data, warn = FALSE)
 
     p_raw <- p
-    cp_root.p <- root.p
     comp <- numeric(nb.tip + nb.node)
 
     p_model <- p_raw
@@ -383,7 +341,7 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
       tip.fog <- numeric(length(fog.vec))
       tip.fog[] <- c(tip.fog.tmp, 0)[fog.vec]
 
-      for (tip.index in seq(nb.tip)) {
+      for (tip.index in seq_len(nb.tip)) {
         idx <- fog_idx[[tip.index]]
         if (length(idx$zeros) > 0) {
           if (rate.cat > 1) {
@@ -400,15 +358,18 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
     }
 
     if (formula_interface) {
-      ## p_model are formula coefficients; do not exponentiate here
-      Q <- build_Q_formula(p_model, q_prep)
+      Q <- as.matrix(q_prep$Q0)
+      for (b in q_prep$blocks) {
+        Q[cbind(b$from, b$to)] <-
+          exp(drop(b$X %*% p_model[b$par_index]))
+      }
+      for (i in seq_len(nrow(Q))) {
+        Q[i, i] <- -sum(Q[i, ])
+      }
 
-      ## only used for some penalty code below; formula penalty is warned as untested
       p_rates <- exp(p_model)
       np <- length(p_model)
-
     } else {
-      ## old interface: p_model are log-rates
       p_rates <- exp(p_model)
       np <- length(p_rates)
 
@@ -421,14 +382,9 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
       }
     }
 
-    ## ---------------------------------------------------------------
-    ## Penalty score - computed on the AD-traced Q, fully differentiable
-    ## Mirrors get_penalty_score() logic but without value-dependent branches
-    ## ---------------------------------------------------------------
     pen_score <- 0
     if (!is.null(pen.type)) {
       if (rate.cat == 1) {
-        ## diagonal of Q holds -rowSums; mean(-diag(Q)) == mean(rowSums of off-diag)
         diag_vals <- numeric(nq)
         for (i in 1:nq) diag_vals[i] <- Q[i, i]
 
@@ -437,21 +393,14 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
         } else if (pen.type == "l2") {
           pen_score <- mean(diag_vals^2)
         } else if (pen.type == "er") {
-          ## original: sd(p) if length(p)>1 else 0
-          ## sd via mean-of-squared-deviations - differentiable
           if (np > 1) {
             pen_score <- mean((p_rates - mean(p_rates))^2)
           }
-          ## if np <= 1, pen_score stays 0
         }
       } else {
-        ## multi-rate-class: sum penalties per rate class using pre-built indices
         pen_score_vec <- numeric(rate.cat)
         for (rc_i in seq_len(rate.cat)) {
           idx <- pen_indices[[rc_i]]
-          ## Extract the off-diagonal sub-block for this rate class
-          ## Q[idx, idx] has diagonal already set; we want only off-diagonal entries
-          ## off-diag mask was computed outside (static structure)
           rc_offdiag <- numeric(0)
           for (r in idx) {
             for (cc in idx) {
@@ -472,9 +421,8 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
         pen_score <- sum(pen_score_vec)
       }
     }
-    ## ---------------------------------------------------------------
 
-    for (i in seq(from = 1, length.out = nb.node)) {
+    for (i in seq_len(nb.node)) {
       focal <- anc[i]
       desRows <- which(phy$edge[,1] == focal)
       desNodes <- phy$edge[desRows, 2]
@@ -498,23 +446,6 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
 
     root <- nb.tip + 1L
 
-    equil.root <- numeric(ncol(Q))
-    QQ <- Q
-    diag(QQ) <- NA
-    for (i in 1:ncol(Q)) {
-      rowsum <- sum(Q[, i], na.rm = TRUE)
-      colsum <- sum(Q[i, ], na.rm = TRUE)
-      equil.root[i] <- rowsum / (rowsum + colsum)
-    }
-
-    if (is.null(root.p)) {
-      flat.root <- equil.root
-      k.rates <- 1 / length(which(!is.na(equil.root)))
-      flat.root[!is.na(flat.root)] <- k.rates
-      flat.root[is.na(flat.root)] <- 0
-      loglik <- -(sum(log(comp[-TIPS])) + log(sum(flat.root * liks[root,])))
-    }
-
     if (is.character(root.p)) {
       if (root.p == "yang") {
         root.p <- Matrix::expm(10000 * Q)[1,]
@@ -527,12 +458,6 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
       if (is.numeric(root.p[1])) {
         loglik <- -(sum(log(comp[-TIPS])) + log(sum(exp(log(root.p) + log(liks[root,])))))
       }
-    }
-
-    if (lewis.asc.bias) {
-      p <- log(p)
-      dummy.liks.vec <- getLewisLikelihood(p = p, phy = phy, liks = liks, Q = Q, rate = rate, root.p = cp_root.p, rate.cat = rate.cat)
-      loglik <- loglik - log(sum(root.p * (1 - exp(dummy.liks.vec))))
     }
 
     prior_nll <- p_model[1] * 0
@@ -562,11 +487,14 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
       }
     }
 
-    ## Apply penalty and prior. Both are zero when disabled.
-    loglik <- loglik + (pen_score * lambda) + prior_nll
-
-    return(loglik)
+    likelihood_nll <- loglik + pen_score * lambda
+    RTMB::REPORT(likelihood_nll)
+    likelihood_nll + prior_nll
   }
 
-  RTMB::MakeADFun(prune_fun, list(p = p), silent = TRUE)
+  RTMB::MakeADFun(
+    prune_nll,
+    list(p = p),
+    silent = TRUE
+  )
 }
