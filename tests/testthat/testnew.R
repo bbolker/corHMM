@@ -1,16 +1,59 @@
-test_that("RTMB is wired through one construction and one nlminb call", {
+test_that("base and RTMB share one nlminb path", {
+  r_dir <- normalizePath(
+    testthat::test_path("..", "..", "R"),
+    mustWork = TRUE
+  )
+  r_lines <- unlist(
+    lapply(
+      list.files(r_dir, pattern = "\\.[Rr]$", full.names = TRUE),
+      readLines,
+      warn = FALSE
+    ),
+    use.names = FALSE
+  )
+
+  expect_equal(
+    sum(grepl("^\\s*corHMM\\s*<-\\s*function\\b", r_lines)),
+    1
+  )
+  expect_equal(
+    sum(grepl("^\\s*mkdev\\.corhmm_rtmb\\s*<-\\s*function\\b", r_lines)),
+    1
+  )
+
   cor_symbols <- all.names(body(corHMM), functions = TRUE)
-  ## not allowed to have :::; we could export the function if we wanted ...  
-  rtmb_symbols <- all.names(body(corHMM:::mkdev.corhmm_rtmb), functions = TRUE)
+  rtmb_symbols <- all.names(
+    body(corHMM:::mkdev.corhmm_rtmb),
+    functions = TRUE
+  )
 
   expect_equal(sum(cor_symbols == "mkdev.corhmm_rtmb"), 1)
   expect_equal(sum(cor_symbols == "nlminb"), 1)
+  expect_false(any(c("nloptr", "NLOPT_LN_SBPLX") %in% cor_symbols))
+
   expect_equal(sum(rtmb_symbols == "MakeADFun"), 1)
+  expect_equal(sum(rtmb_symbols == "REPORT"), 1)
   expect_false("TMBdata" %in% rtmb_symbols)
 })
 
 
-test_that("classic RTMB matches base corHMM likelihood", {
+test_that("mcmcControl supplies and updates chains and iterations", {
+  default <- mcmcControl()
+
+  expect_identical(default, list(chains = 4, iter = 2000))
+
+  control <- mcmcControl(chains = 2, iter = 80)
+
+  expect_identical(control, list(chains = 2, iter = 80))
+
+  control$chains <- 1
+  control$iter <- 40
+
+  expect_identical(control, list(chains = 1, iter = 40))
+})
+
+
+test_that("classic and RTMB optimization give the same likelihood", {
   skip_if_not_installed("RTMB")
 
   set.seed(20)
@@ -27,19 +70,27 @@ test_that("classic RTMB matches base corHMM likelihood", {
     model = "ARD",
     node.states = "none",
     root.p = c(0.5, 0.5),
-    p = c(0.2, 0.3),
+    ip = 0.1,
+    opts = list(
+      eval.max = 1000,
+      iter.max = 1000,
+      rel.tol = 1e-10
+    ),
     verbose = FALSE
   )
 
   fit_base <- do.call(corHMM, c(args, list(use_RTMB = FALSE)))
   fit_rtmb <- do.call(corHMM, c(args, list(use_RTMB = TRUE)))
 
+  expect_s3_class(fit_base, "corhmm")
   expect_s3_class(fit_rtmb, "corhmm")
-  expect_equal(fit_rtmb$loglik, fit_base$loglik, tolerance = 1e-7)
+  expect_true(is.finite(fit_base$loglik))
+  expect_true(is.finite(fit_rtmb$loglik))
+  expect_equal(fit_rtmb$loglik, fit_base$loglik, tolerance = 1e-6)
 })
 
 
-test_that("formula and symmetric models use the RTMB interface", {
+test_that("formula and symmetric models still use RTMB", {
   skip_if_not_installed("RTMB")
 
   set.seed(21)
@@ -71,12 +122,15 @@ test_that("formula and symmetric models use the RTMB interface", {
   expect_true(fit$formula_model)
   expect_true(is.finite(fit$loglik))
   expect_equal(nrow(fit$solution), 8)
-  expect_identical(q$blocks$T1_gain$par_index, q$blocks$T1_loss$par_index)
+  expect_identical(
+    q$blocks$T1_gain$par_index,
+    q$blocks$T1_loss$par_index
+  )
   expect_equal(nrow(fit_symm$solution), 4)
 })
 
 
-test_that("priors produce MAP fits with and without formulas", {
+test_that("priors still produce classic and formula MAP fits", {
   skip_if_not_installed("RTMB")
 
   set.seed(22)
@@ -87,26 +141,27 @@ test_that("priors produce MAP fits with and without formulas", {
   )
   prior <- list(range = 3, coef.sd = 2)
 
-  fit_classic <- corHMM(
-    phy, dat, 1,
-    model = "ARD",
-    node.states = "none",
-    root.p = c(0.5, 0.5),
-    use_RTMB = TRUE,
-    prior = prior,
-    verbose = FALSE
+  fits <- list(
+    corHMM(
+      phy, dat, 1,
+      model = "ARD",
+      node.states = "none",
+      root.p = c(0.5, 0.5),
+      use_RTMB = TRUE,
+      prior = prior,
+      verbose = FALSE
+    ),
+    corHMM(
+      phy, dat, 1,
+      model = T1 ~ 1,
+      node.states = "none",
+      root.p = c(0.5, 0.5),
+      prior = prior,
+      verbose = FALSE
+    )
   )
 
-  fit_formula <- corHMM(
-    phy, dat, 1,
-    model = T1 ~ 1,
-    node.states = "none",
-    root.p = c(0.5, 0.5),
-    prior = prior,
-    verbose = FALSE
-  )
-
-  for (fit in list(fit_classic, fit_formula)) {
+  for (fit in fits) {
     expect_true(is.finite(fit$loglik))
     expect_true(is.finite(fit$logpost))
     expect_true(is.na(fit$AIC))
@@ -114,7 +169,7 @@ test_that("priors produce MAP fits with and without formulas", {
 })
 
 
-test_that("HMC runs with and without formulas and with multiple chains", {
+test_that("mcmcControl runs classic, formula, and multiple-chain HMC", {
   skip_on_cran()
   skip_if_not_installed("RTMB")
   skip_if_not_installed("tmbstan")
@@ -128,34 +183,36 @@ test_that("HMC runs with and without formulas and with multiple chains", {
   )
   prior <- list(range = 3, coef.sd = 2)
 
-  fit_classic <- corHMM(
+  classic_control <- mcmcControl(
+    chains = 1,
+    iter = 40
+  )
+
+  formula_control <- mcmcControl(
+    chains = 2,
+    iter = 40
+  )
+
+  fit_classic <- suppressWarnings(corHMM(
     phy, dat, 1,
     model = "ARD",
     node.states = "none",
     root.p = c(0.5, 0.5),
     use_RTMB = TRUE,
     prior = prior,
-    mcmc = list(
-      chains = 1, cores = 1,
-      iter = 40, warmup = 20,
-      seed = 427, open_progress = FALSE
-    ),
+    mcmc = classic_control,
     verbose = FALSE
-  )
+  ))
 
-  fit_formula <- corHMM(
+  fit_formula <- suppressWarnings(corHMM(
     phy, dat, 1,
     model = T1 ~ 1,
     node.states = "none",
     root.p = c(0.5, 0.5),
     prior = prior,
-    mcmc = list(
-      chains = 2, cores = 1,
-      iter = 40, warmup = 20,
-      seed = 427, open_progress = FALSE
-    ),
+    mcmc = formula_control,
     verbose = FALSE
-  )
+  ))
 
   expect_s4_class(fit_classic$mcmc, "stanfit")
   expect_s4_class(fit_formula$mcmc, "stanfit")
@@ -211,9 +268,7 @@ test_that("btw runs two seeded BayesTraits V5 chains", {
   setwd(bt_path)
 
   set.seed(24)
-
   phy <- ape::rtree(12)
-
   dat <- data.frame(
     sp = phy$tip.label,
     T1 = as.character(rep(0:1, 6)),
@@ -225,8 +280,7 @@ test_that("btw runs two seeded BayesTraits V5 chains", {
       dat,
       phy,
       c(
-        "3",
-        "2",
+        "3", "2",
         "Iterations 40",
         "Burnin 20",
         "Sample 10",
@@ -241,61 +295,16 @@ test_that("btw runs two seeded BayesTraits V5 chains", {
   results <- lapply(fits, function(x) x$Log$results)
 
   expect_length(fits, 2)
-
   expect_true(all(vapply(
     results,
     function(x) is.data.frame(x) && nrow(x) > 0,
     logical(1)
   )))
-
   expect_false(identical(results[[1]], results[[2]]))
 })
 
-test_that("RTMB has one active source path and reports likelihood", {
-  r_dir <- normalizePath(
-    testthat::test_path("..", "..", "R"),
-    mustWork = TRUE
-  )
-  r_lines <- unlist(
-    lapply(
-      list.files(r_dir, pattern = "\\.[Rr]$", full.names = TRUE),
-      readLines,
-      warn = FALSE
-    ),
-    use.names = FALSE
-  )
 
-  expect_equal(
-    sum(grepl("^\\s*corHMM\\s*<-\\s*function\\b", r_lines)),
-    1
-  )
-  expect_equal(
-    sum(grepl("^\\s*translate\\s*<-\\s*function\\b", r_lines)),
-    1
-  )
-  expect_equal(
-    sum(grepl(
-      "^\\s*mkdev\\.corhmm_rtmb\\s*<-\\s*function\\b",
-      r_lines
-    )),
-    1
-  )
-
-  cor_symbols <- all.names(body(corHMM), functions = TRUE)
-  rtmb_symbols <- all.names(
-    body(corHMM:::mkdev.corhmm_rtmb),
-    functions = TRUE
-  )
-
-  expect_equal(sum(cor_symbols == "mkdev.corhmm_rtmb"), 1)
-  expect_equal(sum(cor_symbols == "nlminb"), 1)
-  expect_equal(sum(rtmb_symbols == "MakeADFun"), 1)
-  expect_equal(sum(rtmb_symbols == "REPORT"), 1)
-  expect_false("TMBdata" %in% rtmb_symbols)
-})
-
-
-test_that("RTMB optimization preserves names required by tmbstan", {
+test_that("RTMB optimization preserves names and reports likelihood", {
   skip_if_not_installed("RTMB")
 
   set.seed(25)

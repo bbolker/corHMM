@@ -297,7 +297,11 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD",
     }
 
     if(is.null(opts)){
-        opts <- list("algorithm"="NLOPT_LN_SBPLX", "maxeval"="1000000", "ftol_rel"=.Machine$double.eps^0.5)
+        opts <- list(
+            eval.max=1000000,
+            iter.max=1000000,
+            rel.tol=sqrt(.Machine$double.eps)
+        )
     }
 
     if(!is.null(p)){
@@ -364,39 +368,24 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD",
             }
             if(use_RTMB) names(start) <- names(RTMB_obj$par)
 
-            ## FIXME: should we use nloptr for both types, to unify?
-            ## (nlminb is more common for RTMB fits; the current default
-            ## for nloptr is the NLOPT_LN_SBPLX algorithm, which is gradient-free)
-            ## Also: traditional use of nloptr() can pass additional arguments through to the objective function,
-            ## while RTMB requires that all auxiliary quantities be compiled into the TMB object at
-            ## MakeADFun() call ...
-            if (use_RTMB) {
-                stats::nlminb(
-                    start,
-                    RTMB_obj$fn,
-                    RTMB_obj$gr,
-                    lower=lower,
-                    upper=upper
-                )
+            objective <- if(use_RTMB){
+                RTMB_obj$fn
             } else {
-                z <- nloptr(
-                    x0=start, eval_f=dev.corhmm,
-                    lb=lower, ub=upper, opts=opts,
-                    phy=phy, liks=model.set.final$liks,
-                    Q=model.set.final$Q, rate=model.set.final$rate,
-                    root.p=root.p, rate.cat=rate.cat,
-                    order.test=order.test,
-                    lewis.asc.bias=lewis.asc.bias,
-                    set.fog=set.fog, fog.vec=model.set.final$fog.vec
-                )
-                list(
-                    par=z$solution,
-                    objective=z$objective,
-                    iterations=z$iterations,
-                    convergence=z$status,
-                    message=z$message
+                function(p) dev.corhmm(
+                    p, phy, model.set.final$liks, model.set.final$Q,
+                    model.set.final$rate, root.p, rate.cat, order.test,
+                    lewis.asc.bias, set.fog, model.set.final$fog.vec
                 )
             }
+
+            stats::nlminb(
+                start=start,
+                objective=objective,
+                gradient=if(use_RTMB) RTMB_obj$gr else NULL,
+                lower=lower,
+                upper=upper,
+                control=opts
+            )
         }
 
         if(verbose == TRUE){
@@ -439,29 +428,13 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD",
 
     mcmc.fit <- NULL
     if(!is.null(mcmc)){
-        ## FIXME: we can streamline this a bit by having an mcmcControl() function that
-        ## implements/documents default values ... shouldn't be hard-coded
-        ## (compare lmerControl, glmerControl in the lme4 package, although these have
-        ## some more complicated stuff in them that we don't need - or glmmTMBControl::glmmTMBControl()
-        ## (probably simpler)
-        if(is.null(mcmc$chains)) mcmc$chains <- 4
-        if(is.null(mcmc$iter)) mcmc$iter <- 2000
-        if(is.null(mcmc$warmup)) mcmc$warmup <- mcmc$iter/2
-        if(is.null(mcmc$seed)) mcmc$seed <- 427
-        if(is.null(mcmc$cores)) mcmc$cores <- mcmc$chains
-        if(is.null(mcmc$open_progress)) mcmc$open_progress <- FALSE
-        if(is.null(mcmc$control)) mcmc$control <- list(adapt_delta=0.9, max_treedepth=12)
+        mcmc <- do.call(mcmcControl, mcmc)
 
         mcmc.fit <- tmbstan::tmbstan(
             RTMB_obj,
             chains=mcmc$chains,
-            cores=mcmc$cores,
             iter=mcmc$iter,
-            warmup=mcmc$warmup,
-            seed=mcmc$seed,
-            init=rep(list(out$par), mcmc$chains),
-            open_progress=mcmc$open_progress,
-            control=mcmc$control
+            init=rep(list(out$par), mcmc$chains)
         )
     }
 
