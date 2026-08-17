@@ -77,6 +77,12 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD",
         if(is.null(prior$ub)) prior$ub <- log(upper.bound)
         if(is.null(prior$range)) prior$range <- 3
         if(is.null(prior$coef.sd)) prior$coef.sd <- 2
+        if(is.null(prior$target)) prior$target <- "rates"
+        prior$target <- match.arg(prior$target, c("rates", "coefficients"))
+
+        if(!model_is_formula && prior$target != "rates"){
+            stop("`prior$target = 'coefficients'` is only available for formula models.", call. = FALSE)
+        }
     }
 
     lb <- log(lower.bound)
@@ -350,8 +356,14 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD",
         }
 
         fit_one <- function(i){
-            if(model_is_formula){
-                start <- if(i == 1) rep(log(0.1), model.set.final$np) else rnorm(model.set.final$np, log(0.1), 1)
+            if(!is.null(ip)){
+                start <- rep(ip, length.out = model.set.final$np)
+            } else {
+                start <- if(i == 1) {
+                    rep(log(0.1), model.set.final$np)
+                } else {
+                    rnorm(model.set.final$np, log(0.1), 1)
+                }
             } else if(!is.null(ip)){
                 start <- rep(ip, length.out=model.set.final$np)
             } else if(mean.change == 0){
@@ -433,8 +445,13 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD",
         mcmc.fit <- tmbstan::tmbstan(
             RTMB_obj,
             chains=mcmc$chains,
+            cores=mcmc$cores,
             iter=mcmc$iter,
-            init=rep(list(out$par), mcmc$chains)
+            warmup=mcmc$warmup,
+            seed=mcmc$seed,
+            init=rep(list(out$par), mcmc$chains),
+            open_progress=mcmc$open_progress,
+            control=mcmc$control
         )
     }
 

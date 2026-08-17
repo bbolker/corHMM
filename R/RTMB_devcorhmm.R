@@ -179,6 +179,20 @@ translate <- function(formula_list, nstate = 2) {
     par_names[b$par_index] <- b$coef_names
   }
 
+  rate_X <- matrix(
+    0,
+    nrow = nrow(edge_tab),
+    ncol = n_par,
+    dimnames = list(
+      paste(edge_tab$from_label, edge_tab$to_label, sep = "->"),
+      par_names
+    )
+  )
+
+  for (b in blocks) {
+    rate_X[b$edge_id, b$par_index] <- b$X
+  }
+
   list(
     d = ns,
     trait_names = trait_names,
@@ -191,7 +205,8 @@ translate <- function(formula_list, nstate = 2) {
     Q0 = Q0,
     n_par = n_par,
     par_names = par_names,
-    par_index = lapply(blocks, `[[`, "par_index")
+    par_index = lapply(blocks, `[[`, "par_index"),
+    rate_X = rate_X
   )
 }
 
@@ -264,17 +279,25 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
     NULL
   }
 
+  has_prior <- !is.null(prior)
+  prior_on_rates <- FALSE
+  prior_on_coefficients <- FALSE
   prior.mean <- prior.sd <- coef.sd <- 0
   intercept_idx <- slope_idx <- integer(0)
 
-  if (!is.null(prior)) {
+  if (has_prior) {
     prior.mean <- (prior$lb + prior$ub) / 2
     prior.sd <- (prior$ub - prior$lb) / (2 * prior$range)
     coef.sd <- prior$coef.sd
 
     if (formula_interface) {
-      intercept_idx <- grep(":\\(Intercept\\)$", q_prep$par_names)
-      slope_idx <- setdiff(seq_along(q_prep$par_names), intercept_idx)
+      prior_on_rates <- identical(prior$target, "rates")
+      prior_on_coefficients <- identical(prior$target, "coefficients")
+
+      if (prior_on_coefficients) {
+        intercept_idx <- grep(":\\(Intercept\\)$", q_prep$par_names)
+        slope_idx <- setdiff(seq_along(q_prep$par_names), intercept_idx)
+      }
     }
   }
 
@@ -301,7 +324,6 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
     pen.type = pen.type,
     lambda = lambda,
     q_prep = q_prep,
-    prior = prior,
     formula_interface = formula_interface,
     nb.node = nb.node,
     nb.tip = nb.tip,
@@ -311,6 +333,9 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
     nq = nq,
     pen_indices = pen_indices,
     fog_idx = fog_idx,
+    has_prior = has_prior,
+    prior_on_rates = prior_on_rates,
+    prior_on_coefficients = prior_on_coefficients,
     prior.mean = prior.mean,
     prior.sd = prior.sd,
     coef.sd = coef.sd,
@@ -358,6 +383,7 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
     }
 
     if (formula_interface) {
+      eta_rates <- drop(q_prep$rate_X %*% p_model)
       Q <- as.matrix(q_prep$Q0)
       for (b in q_prep$blocks) {
         Q[cbind(b$from, b$to)] <-
@@ -367,8 +393,8 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
         Q[i, i] <- -sum(Q[i, ])
       }
 
-      p_rates <- exp(p_model)
-      np <- length(p_model)
+      p_rates <- exp(eta_rates)
+      np <- length(p_rates)
     } else {
       p_rates <- exp(p_model)
       np <- length(p_rates)
@@ -462,8 +488,14 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
 
     prior_nll <- p_model[1] * 0
 
-    if (!is.null(prior)) {
-      if (formula_interface) {
+    if (has_prior) {
+      if (formula_interface && prior_on_rates) {
+        x <- eta_rates
+        prior_nll <- prior_nll + sum(
+          0.5 * log(2 * pi * prior.sd^2) +
+            0.5 * ((x - prior.mean) / prior.sd)^2
+        )
+      } else if (formula_interface && prior_on_coefficients) {
         if (length(intercept_idx) > 0) {
           x <- p_model[intercept_idx]
           prior_nll <- prior_nll + sum(
