@@ -356,20 +356,25 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD",
         }
 
         fit_one <- function(i){
-            if(!is.null(ip)){
-                start <- rep(ip, length.out = model.set.final$np)
-            } else {
-                start <- if(i == 1) {
-                    rep(log(0.1), model.set.final$np)
+            if(model_is_formula){
+                if(!is.null(ip)){
+                    start <- rep(ip, length.out=model.set.final$np)
+                } else if(i == 1){
+                    start <- rep(log(0.1), model.set.final$np)
                 } else {
-                    rnorm(model.set.final$np, log(0.1), 1)
+                    start <- rnorm(model.set.final$np, log(0.1), 1)
                 }
-            } else if(!is.null(ip)){
-                start <- rep(ip, length.out=model.set.final$np)
-            } else if(mean.change == 0){
-                start <- rep(0.01 + exp(lb), model.set.final$np)
             } else {
-                start <- sort(rexp(model.set.final$np, 1/mean.change), decreasing=TRUE)
+                if(!is.null(ip)){
+                    start <- rep(ip, length.out=model.set.final$np)
+                } else if(mean.change == 0){
+                    start <- rep(0.01 + exp(lb), model.set.final$np)
+                } else {
+                    start <- sort(
+                        rexp(model.set.final$np, 1/mean.change),
+                        decreasing=TRUE
+                    )
+                }
             }
 
             if(!model_is_formula){
@@ -378,6 +383,7 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD",
                 if(set.fog) start <- c(rep(fog.ip, n.fog), start)
                 start <- log(start)
             }
+
             if(use_RTMB) names(start) <- names(RTMB_obj$par)
 
             objective <- if(use_RTMB){
