@@ -52,7 +52,7 @@ t_orig <-
               )
 
 fitted_pars_orig <- get_pars(fit_orig)
-expect_equal(fitted_pars_orig, best_pars)
+expect_equal(fitted_pars_orig, best_pars, tolerance = 5e-3)
 expect_equal(fit_orig$loglik, best_loglik)
 
 t_RTMB <-

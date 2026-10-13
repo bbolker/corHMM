@@ -40,7 +40,7 @@ test_that("Bayesian options are integrated into corHMM", {
       ),
       verbose = FALSE
     ),
-    "HMC requires priors"
+    "HMC requires `prior`"
   )
 
   expect_error(
@@ -53,7 +53,7 @@ test_that("Bayesian options are integrated into corHMM", {
       prior = list(),
       verbose = FALSE
     ),
-    "currently require a formula model"
+    "Priors currently require `use_RTMB = TRUE`"
   )
 })
 
@@ -66,7 +66,7 @@ test_that("formula priors are included in the RTMB objective", {
     T2 ~ 1
   )
 
-  q_prep <- Q_prep(
+  q_prep <- translate(
     formula_list = model,
     nstate = 2
   )
@@ -80,7 +80,8 @@ test_that("formula priors are included in the RTMB objective", {
     lb = log(1e-4),
     ub = log(10),
     range = 3,
-    coef.sd = 2
+    coef.sd = 2,
+    target = "coefficients"
   )
 
   root.p <- rep(1 / q_prep$d, q_prep$d)
