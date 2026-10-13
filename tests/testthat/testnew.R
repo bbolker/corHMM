@@ -1,8 +1,7 @@
 test_that("base and RTMB share one nlminb path", {
-  r_dir <- normalizePath(
-    testthat::test_path("..", "..", "R"),
-    mustWork = TRUE
-  )
+  ## R sources are only available when testing from the source tree
+  r_dir <- testthat::test_path("..", "..", "R")
+  skip_if_not(dir.exists(r_dir), "package R sources not available")
   r_lines <- unlist(
     lapply(
       list.files(r_dir, pattern = "\\.[Rr]$", full.names = TRUE),
@@ -185,12 +184,14 @@ test_that("mcmcControl runs classic, formula, and multiple-chain HMC", {
 
   classic_control <- mcmcControl(
     chains = 1,
-    iter = 40
+    iter = 40,
+    refresh = 0
   )
 
   formula_control <- mcmcControl(
     chains = 2,
-    iter = 40
+    iter = 40,
+    refresh = 0
   )
 
   fit_classic <- suppressWarnings(corHMM(
@@ -275,8 +276,11 @@ test_that("btw runs two seeded BayesTraits V5 chains", {
     T2 = as.character(rep(c(0, 0, 1, 1), 3))
   )
 
+  ## btw is not on CRAN; avoid `btw::` so R CMD check doesn't require it
+  bayestraits <- getExportedValue("btw", "bayestraits")
+
   fits <- lapply(c(427, 428), function(seed) {
-    btw::bayestraits(
+    bayestraits(
       dat,
       phy,
       c(

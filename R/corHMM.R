@@ -446,19 +446,30 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD",
 
     mcmc.fit <- NULL
     if(!is.null(mcmc)){
+        if(!requireNamespace("tmbstan", quietly = TRUE)){
+            stop("HMC requires the `tmbstan` package.", call. = FALSE)
+        }
         mcmc <- do.call(mcmcControl, mcmc)
 
-        mcmc.fit <- tmbstan::tmbstan(
-            RTMB_obj,
-            chains=mcmc$chains,
-            cores=mcmc$cores,
-            iter=mcmc$iter,
-            warmup=mcmc$warmup,
-            seed=mcmc$seed,
-            init=rep(list(out$par), mcmc$chains),
-            open_progress=mcmc$open_progress,
-            control=mcmc$control
-        )
+        ## start chains at the posterior mode, except for one-parameter
+        ## models: tmbstan passes a length-1 init as a scalar where Stan
+        ## expects a vector, and sampling fails ("no more scalars to read")
+        if(length(out$par) == 1){
+            warning("HMC for one-parameter models ignores `init` ",
+                    if(is.null(mcmc$init)) "(posterior mode) " else "(user-supplied) ",
+                    "and starts chains at random values (tmbstan limitation).",
+                    call. = FALSE)
+            mcmc$init <- NULL
+        } else if(is.null(mcmc$init)){
+            mcmc$init <- rep(list(unname(out$par)), mcmc$chains)
+        }
+
+        ## settings left unspecified must be omitted, not passed as NULL:
+        ## rstan fails on e.g. seed = NULL and silently returns no samples
+        mcmc.fit <- do.call(tmbstan::tmbstan, c(list(RTMB_obj), mcmc))
+        if(length(mcmc.fit@sim$samples) == 0){
+            stop("HMC sampling failed: no samples were returned.", call. = FALSE)
+        }
     }
 
     if(model_is_formula){
@@ -1030,7 +1041,7 @@ print.corhmm <- function(x,...){
 		cat("\n")
 	}
 
-	UserStates <- gsub("_", "|", corHMM:::corProcessData(x$data)$PossibleTraits)
+	UserStates <- gsub("_", "|", corProcessData(x$data)$PossibleTraits)
 	ColNames <- paste0(colnames(x$data)[-1], collapse = "|")
 
 	cat("Legend\n")

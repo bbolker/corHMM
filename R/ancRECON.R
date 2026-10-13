@@ -1647,7 +1647,7 @@ ancRECON_slice <- function(corhmm.obj, time_slice, edge=NULL, collapse=TRUE, nco
   p <- sapply(1:max(corhmm.obj$index.mat, na.rm = TRUE), function(x) na.omit(c(corhmm.obj$solution))[na.omit(c(corhmm.obj$index.mat) == x)][1])
 ##### Check #####
   ntraits <- max(as.numeric(corhmm.obj$data.legend$d))
-  all_recon <- mclapply(all_trees, function(x) corHMM:::GetEdgeMarginal(p=p, phy=x, data=new.data, rate.mat=corhmm.obj$index.mat, rate.cat=corhmm.obj$rate.cat, ntraits=ntraits, root.p=corhmm.obj$root.p, model = "ARD", collapse = collapse), mc.cores = ncores)
+  all_recon <- mclapply(all_trees, function(x) GetEdgeMarginal(p=p, phy=x, data=new.data, rate.mat=corhmm.obj$index.mat, rate.cat=corhmm.obj$rate.cat, ntraits=ntraits, root.p=corhmm.obj$root.p, model = "ARD", collapse = collapse), mc.cores = ncores)
   all_recon <-  do.call(rbind, all_recon)
   colnames(all_recon) <- colnames(corhmm.obj$solution)
   out <- cbind(to_recon, all_recon)
@@ -1662,7 +1662,7 @@ plot_slice_recon <- function(phy, slice_df, col=NULL){
   XX <- lastPP$xx[node]
   YY <- lastPP$yy[node]
   for(i in 1:nrow(slice_df)){
-	focal <- slice_df[i,]
+	focal <- unlist(slice_df[i,])
 	xx <- lastPP$xx[focal[2]] - focal[3]
 	yy <- lastPP$yy[focal[2]]
 	pp <- focal[-c(1:3)]

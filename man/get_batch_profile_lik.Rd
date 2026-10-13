@@ -49,7 +49,7 @@ data(primates)
 phy <- multi2di(primates[[1]])
 data <- primates[[2]]
 corhmm_fit <- corHMM(phy = phy, data = data, rate.cat = 1)
-profile_results <- get_batch_profile_lik(corhmm_fit, range_factor = 2, n_points = 50)
+profile_results <- get_batch_profile_lik(corhmm_fit, range_factor = 2, n_points = 10)
 plot_batch_profile_lik(profile_results)
 }
 }

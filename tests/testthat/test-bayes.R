@@ -197,6 +197,7 @@ test_that("parallel HMC works through corHMM", {
         warmup = 500,
         seed = 427,
         open_progress = FALSE,
+        refresh = 0,
         control = list(
           adapt_delta = 0.8,
           max_treedepth = 6
@@ -219,6 +220,31 @@ test_that("parallel HMC works through corHMM", {
   draws <- as.matrix(fit$mcmc)
 
   expect_true(is.matrix(draws))
-  expect_equal(nrow(draws), 40)
+  expect_equal(nrow(draws), 2 * (1000 - 500))
   expect_true(all(is.finite(draws)))
+})
+
+test_that("one-parameter HMC warns that init is ignored and still samples", {
+  skip_on_cran()
+  skip_if_not_installed("tmbstan")
+
+  x <- make_formula_data(8, two_trait = FALSE)
+
+  expect_warning(
+    fit <- corHMM(
+      phy = x$phy,
+      data = x$dat,
+      rate.cat = 1,
+      model = "ER",
+      node.states = "none",
+      root.p = c(0.5, 0.5),
+      use_RTMB = TRUE,
+      prior = list(),
+      mcmc = list(chains = 1, iter = 100, seed = 101, refresh = 0),
+      verbose = FALSE
+    ),
+    "ignores `init`"
+  )
+
+  expect_equal(nrow(as.matrix(fit$mcmc)), 50)
 })

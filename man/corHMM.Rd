@@ -8,7 +8,7 @@ node.states = "marginal", fixed.nodes=FALSE, p=NULL, root.p="yang",
 tip.fog=NULL, ip=NULL, fog.ip=0.01, nstarts=0, n.cores=1, 
 get.tip.states = FALSE, lewis.asc.bias = FALSE, collapse = TRUE, 
 lower.bound = 1e-9, upper.bound = 100, opts=NULL, return.devfun = FALSE, use_RTMB = FALSE,
-verbose=TRUE)
+prior = NULL, mcmc = NULL, verbose=TRUE)
 }
 \arguments{
 \item{phy}{a phylogenetic tree, in \code{ape} \dQuote{phylo} format.}
@@ -33,6 +33,8 @@ verbose=TRUE)
 \item{opts}{options to pass to nloptr. default is \code{NULL}.}
 \item{return.devfun}{return deviance function?}
 \item{use_RTMB}{use RTMB for optimization?}
+\item{prior}{an optional list specifying Normal priors on the log-scale parameters; requires \code{use_RTMB = TRUE} (or a formula model). When supplied, \code{corHMM} maximizes the log-posterior rather than the log-likelihood. Elements (all optional): \code{lb}, \code{ub} (lower and upper ends of the plausible range of log-rates; default \code{log(lower.bound)} and \code{log(upper.bound)}); \code{range} (the half-width of \code{[lb, ub]} in prior standard deviations, so the prior is Normal with mean \code{(lb+ub)/2} and SD \code{(ub-lb)/(2*range)}; default 3); \code{coef.sd} (SD of the zero-mean Normal prior on non-intercept coefficients of formula models; default 2); \code{target} (\code{"rates"}, the default, puts the prior on log-rates; \code{"coefficients"}, for formula models only, puts it on the model coefficients). Use \code{prior = list()} for all defaults.}
+\item{mcmc}{an optional list of settings for Hamiltonian Monte Carlo sampling of the posterior with \code{tmbstan::tmbstan} (see \code{\link{mcmcControl}}); requires \code{prior} and the \code{tmbstan} package. Unless \code{init} is given, chains start at the posterior mode; for models with a single parameter, \code{init} is ignored (with a warning) and chains start at random values.}
 \item{verbose}{a boolean indicating whether to print progress to screen. default is \code{TRUE}}
 }
 \details{
@@ -55,6 +57,8 @@ Ancestral states can be estimated using marginal, joint, scaled, or none approac
 \value{
 \code{corHMM} returns an object of class \code{corHMM}. This is a list with elements:
 \item{$loglik}{the maximum negative log-likelihood.}
+\item{$logpost}{the log-posterior at the posterior mode if \code{prior} was given, otherwise \code{NA}. AIC and AICc are \code{NA} when a prior is used.}
+\item{$mcmc}{a \code{stanfit} object containing the HMC samples if \code{mcmc} was given, otherwise \code{NULL}.}
 \item{$AIC}{Akaike information criterion.}
 \item{$AICc}{Akaike information criterion corrected for sample size.}
 \item{$rate.cat}{The number of rate categories specified.}

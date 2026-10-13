@@ -7,10 +7,14 @@ namedList <- function(...) {
 }
 
 #' control parameters for MCMC runs
+#'
+#' All elements are passed to \code{rstan::sampling()} through
+#' \code{tmbstan::tmbstan()}; see those help pages.
 #' @param chains number of MCMC chains
 #' @param iter MCMC iterations per chain
-#' note that these are all passed to rstan::sampling() through tmbstan::tmbstan(),
-#' with some modifications - see the relevant help pages
+#' @param ... other arguments to \code{tmbstan::tmbstan()}, e.g. \code{warmup},
+#' \code{cores}, \code{seed}, \code{control}, \code{open_progress}
+#' @export
 mcmcControl <- function(chains = 4, iter = 2000, ...) {
-    namedList(chains, iter)
+    c(namedList(chains, iter), list(...))
 }
