@@ -211,11 +211,64 @@ translate <- function(formula_list, nstate = 2) {
 }
 
 
+## Group the edges for level-wise pruning. A node's level is 1 + the maximum
+## level of its children (tips are level 0), so all edges whose parent is at
+## the same level can be processed together once the lower levels are done.
+## For each level: the edge rows, child nodes, edge lengths and parent nodes,
+## plus, for the k-th child of each parent (`slots`), which rows of the
+## per-edge result go to which parent.
+prune_levels <- function(phy) {
+  nb.tip <- Ntip(phy)
+  e <- phy$edge
+  lev <- integer(nb.tip + Nnode(phy))
+  for (r in reorder(phy, "postorder", index.only = TRUE)) {
+    lev[e[r, 1]] <- max(lev[e[r, 1]], lev[e[r, 2]] + 1L)
+  }
+  lapply(sort(unique(lev[-seq_len(nb.tip)])), function(L) {
+    rows <- which(lev[e[, 1]] == L)
+    rows <- rows[order(e[rows, 1])]
+    par <- e[rows, 1]
+    nodes <- unique(par)
+    slot <- stats::ave(seq_along(par), par, FUN = seq_along)
+    list(
+      child = e[rows, 2],
+      t = phy$edge.length[rows],
+      nodes = nodes,
+      slots = lapply(seq_len(max(slot)), function(k) {
+        list(src = which(slot == k), dst = match(par[slot == k], nodes))
+      })
+    )
+  })
+}
+
+## TRUE if Q has (nearly) repeated eigenvalues or (nearly) defective
+## eigenvectors, where derivatives through the eigendecomposition are unreliable
+eigen_degenerate <- function(Q, gap_tol = 1e-6, kappa_tol = 1e8) {
+  if (any(!is.finite(Q))) return(TRUE)
+  ev <- eigen(Q, symmetric = FALSE)
+  lam <- ev$values
+  scale <- max(Mod(lam), .Machine$double.xmin)
+  gaps <- Mod(outer(lam, lam, "-"))[upper.tri(diag(length(lam)))]
+  any(!is.finite(lam)) ||
+    min(gaps) / scale < gap_tol ||
+    kappa(ev$vectors, exact = TRUE) > kappa_tol
+}
+
+## pruning = "auto" (default) uses one eigendecomposition of Q per evaluation,
+## with all edges at the same tree level handled together ("eigen"), and
+## falls back to a matrix exponential per edge ("expm") where Q has repeated
+## eigenvalues: always, if they are repeated for any parameter values (e.g.
+## ER models with > 2 states); otherwise only at parameter values where they
+## (nearly) coincide, such as equal starting values. The fallback applies to
+## $fn, $gr and $report; samplers that use the tape directly (tmbstan) use
+## the eigen tape unless the degeneracy is structural.
 mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
                               order.test, lewis.asc.bias,
                               set.fog = FALSE, fog.vec = NULL,
                               pen.type = NULL, lambda = 1,
-                              q_prep = NULL, prior = NULL) {
+                              q_prep = NULL, prior = NULL,
+                              pruning = c("auto", "eigen", "expm")) {
+  pruning <- match.arg(pruning)
   formula_interface <- !is.null(q_prep)
   n_fog <- if (set.fog) length(unique(fog.vec)) else 0L
 
@@ -301,6 +354,22 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
     }
   }
 
+  ## tree topology, precomputed once: child edges of each internal node (for
+  ## "expm"), edge groups by level (for "eigen"), and the fixed-node masks
+  child_rows <- split(seq_len(nrow(phy$edge)), phy$edge[, 1])[as.character(anc)]
+  level_groups <- prune_levels(phy)
+  fixer_mat <- NULL
+  if (!is.null(phy$node.label)) {
+    fixer_mat <- matrix(1, nb.tip + nb.node, nq)
+    for (focal in anc) {
+      if (!is.na(phy$node.label[focal - nb.tip])) {
+        fixer.tmp <- numeric(nq / rate.cat)
+        fixer.tmp[phy$node.label[focal - nb.tip]] <- 1
+        fixer_mat[focal, ] <- rep(fixer.tmp, rate.cat)
+      }
+    }
+  }
+
   if (is.null(root.p)) {
     adjacency <- if (formula_interface) {
       q_prep$Q_indicator > 0
@@ -340,10 +409,53 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
     prior.sd = prior.sd,
     coef.sd = coef.sd,
     intercept_idx = intercept_idx,
-    slope_idx = slope_idx
+    slope_idx = slope_idx,
+    child_rows = child_rows,
+    level_groups = level_groups,
+    fixer_mat = fixer_mat
   )
 
-  prune_nll <- function(pars) {
+  ## rate matrix from the model parameters (fog parameters removed); works
+  ## for both AD and plain numeric parameters
+  build_Q <- function(p_model) {
+    "[<-" <- RTMB::ADoverload("[<-")
+    "c" <- RTMB::ADoverload("c")
+    eta_rates <- NULL
+    if (formula_interface) {
+      eta_rates <- drop(q_prep$rate_X %*% p_model)
+      Q <- as.matrix(q_prep$Q0)
+      for (b in q_prep$blocks) {
+        Q[cbind(b$from, b$to)] <-
+          exp(drop(b$X %*% p_model[b$par_index]))
+      }
+      for (i in seq_len(nrow(Q))) {
+        Q[i, i] <- -sum(Q[i, ])
+      }
+
+      p_rates <- exp(eta_rates)
+      np <- length(p_rates)
+    } else {
+      p_rates <- exp(p_model)
+      np <- length(p_rates)
+
+      Q <- rate
+      Q[Q <= np] <- p_rates[Q[Q <= np]]
+      Q[rate == np + 1] <- 0
+
+      for (i in seq_len(nrow(Q))) {
+        Q[i, i] <- -sum(Q[i, ])
+      }
+    }
+    list(Q = Q, eta_rates = eta_rates, p_rates = p_rates, np = np)
+  }
+
+  ## plain numeric Q at parameter vector p (for the degeneracy check)
+  Q_at <- function(p) {
+    p_model <- if (n_fog) p[-seq_len(n_fog)] else p
+    build_Q(as.numeric(p_model))$Q
+  }
+
+  make_prune_nll <- function(method) function(pars) {
     "[<-" <- RTMB::ADoverload("[<-")
     "c" <- RTMB::ADoverload("c")
     "diag<-" <- RTMB::ADoverload("diag<-")
@@ -382,31 +494,11 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
       }
     }
 
-    if (formula_interface) {
-      eta_rates <- drop(q_prep$rate_X %*% p_model)
-      Q <- as.matrix(q_prep$Q0)
-      for (b in q_prep$blocks) {
-        Q[cbind(b$from, b$to)] <-
-          exp(drop(b$X %*% p_model[b$par_index]))
-      }
-      for (i in seq_len(nrow(Q))) {
-        Q[i, i] <- -sum(Q[i, ])
-      }
-
-      p_rates <- exp(eta_rates)
-      np <- length(p_rates)
-    } else {
-      p_rates <- exp(p_model)
-      np <- length(p_rates)
-
-      Q <- rate
-      Q[Q <= np] <- p_rates[Q[Q <= np]]
-      Q[rate == np + 1] <- 0
-
-      for (i in seq_len(nrow(Q))) {
-        Q[i, i] <- -sum(Q[i, ])
-      }
-    }
+    qq <- build_Q(p_model)
+    Q <- qq$Q
+    eta_rates <- qq$eta_rates
+    p_rates <- qq$p_rates
+    np <- qq$np
 
     pen_score <- 0
     if (!is.null(pen.type)) {
@@ -448,26 +540,65 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
       }
     }
 
-    for (i in seq_len(nb.node)) {
-      focal <- anc[i]
-      desRows <- which(phy$edge[,1] == focal)
-      desNodes <- phy$edge[desRows, 2]
-      v <- 1
-      for (desIndex in seq_along(desRows)) {
-        v <- drop(as.matrix(v * Matrix::expm(Q * phy$edge.length[desRows[desIndex]]) %*% liks[desNodes[desIndex],]))
-      }
-
-      if (!is.null(phy$node.label)) {
-        if (!is.na(phy$node.label[focal - nb.tip])) {
-          fixer.tmp <- numeric(dim(Q)[2] / rate.cat)
-          fixer.tmp[phy$node.label[focal - nb.tip]] <- 1
-          fixer <- rep(fixer.tmp, rate.cat)
-          v <- v * fixer
+    if (method == "eigen") {
+      ## P(t) x = V exp(Lambda t) V^{-1} x, from one eigendecomposition of Q.
+      ## The eigensystem is complex in general (Q is not symmetric). RTMB's
+      ## complex AD type (adcomplex, a pair of real advectors) lacks methods for
+      ## matrix(), outer() etc., so carry the real and imaginary parts as plain
+      ## advectors and use real AD arithmetic
+      ev <- RTMB::eigen(Q, symmetric = FALSE)
+      V <- ev$vectors
+      Vi <- RTMB::solve(V)
+      tVr <- t(Re(V)); tVim <- t(Im(V))
+      tVir <- t(Re(Vi)); tViim <- t(Im(Vi))
+      ## t() rather than matrix(), which drops the AD class
+      lam_r <- t(Re(ev$values))
+      lam_i <- t(Im(ev$values))
+      ## One pass per tree level: each row of Y is P(t_e) x for one edge e,
+      ## computed in the eigenbasis as P(t) x = V exp(Lambda t) V^{-1} x for
+      ## all edges at the level at once. Rows are transposed (row vectors), so
+      ## the code multiplies on the right by t(V^{-1}) and t(V), and the complex
+      ## product is expanded into real and imaginary parts: with W = x V^{-1}
+      ## and E = exp(Lambda t), only Re((W * E) V) is needed. Sibling rows are
+      ## then multiplied into their parent's row (via L$slots), any fixed-node
+      ## mask is applied, and the result is normalized.
+      for (L in level_groups) {
+        X <- liks[L$child, , drop = FALSE]
+        tt <- matrix(L$t, ncol = 1)
+        ea <- exp(tt %*% lam_r)
+        tb <- tt %*% lam_i
+        Er <- ea * cos(tb)
+        Ei <- ea * sin(tb)
+        Wr <- X %*% tVir
+        Wi <- X %*% tViim
+        ## one row per edge: (P(t) x)^T for that edge's child
+        Y <- (Wr * Er - Wi * Ei) %*% tVr - (Wr * Ei + Wi * Er) %*% tVim
+        s1 <- L$slots[[1]]
+        v <- Y[s1$src, , drop = FALSE]
+        for (s in L$slots[-1]) {
+          v[s$dst, ] <- v[s$dst, , drop = FALSE] * Y[s$src, , drop = FALSE]
         }
+        if (!is.null(fixer_mat)) v <- v * fixer_mat[L$nodes, , drop = FALSE]
+        ## row sums as a matrix product: base rowSums() drops the AD class
+        cs <- (v %*% rep(1, nq))[, 1]
+        comp[L$nodes] <- cs
+        liks[L$nodes, ] <- v / cs
       }
+    } else {
+      for (i in seq_len(nb.node)) {
+        focal <- anc[i]
+        desRows <- child_rows[[i]]
+        desNodes <- phy$edge[desRows, 2]
+        v <- 1
+        for (desIndex in seq_along(desRows)) {
+          v <- drop(as.matrix(v * Matrix::expm(Q * phy$edge.length[desRows[desIndex]]) %*% liks[desNodes[desIndex],]))
+        }
 
-      comp[focal] <- sum(v)
-      liks[focal, ] <- v / comp[focal]
+        if (!is.null(fixer_mat)) v <- v * fixer_mat[focal, ]
+
+        comp[focal] <- sum(v)
+        liks[focal, ] <- v / comp[focal]
+      }
     }
 
     root <- nb.tip + 1L
@@ -524,9 +655,48 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
     likelihood_nll + prior_nll
   }
 
-  RTMB::MakeADFun(
-    prune_nll,
-    list(p = p),
-    silent = TRUE
-  )
+  mk_obj <- function(method) {
+    RTMB::MakeADFun(
+      make_prune_nll(method),
+      list(p = p),
+      silent = TRUE
+    )
+  }
+
+  if (pruning == "auto") {
+    ## structural check: repeated eigenvalues at two arbitrary, irregular
+    ## parameter vectors mean they are repeated everywhere (e.g. ER with > 2
+    ## states). Deterministic, so the user's random-number stream is untouched
+    k <- seq_along(p)
+    p_test <- list(-1 - 0.3 * sqrt(k), -0.5 + 0.2 * log(k + 1.7) * (-1)^k)
+    structural <- all(vapply(p_test, function(pp) eigen_degenerate(Q_at(pp)),
+                             logical(1)))
+    if (structural) pruning <- "expm"
+  }
+  if (pruning == "expm") return(mk_obj("expm"))
+
+  obj <- mk_obj("eigen")
+  if (pruning == "eigen") return(obj)
+
+  ## "auto": use a per-edge expm tape (built on first use) at parameter
+  ## values where the eigendecomposition is degenerate
+  obj_expm <- NULL
+  use_expm <- function(par) {
+    if (!eigen_degenerate(Q_at(par))) return(FALSE)
+    if (is.null(obj_expm)) obj_expm <<- mk_obj("expm")
+    TRUE
+  }
+  fn_eigen <- obj$fn
+  gr_eigen <- obj$gr
+  report_eigen <- obj$report
+  obj$fn <- function(x = obj$par, ...) {
+    if (use_expm(x)) obj_expm$fn(x, ...) else fn_eigen(x, ...)
+  }
+  obj$gr <- function(x = obj$par, ...) {
+    if (use_expm(x)) obj_expm$gr(x, ...) else gr_eigen(x, ...)
+  }
+  obj$report <- function(par = obj$env$last.par, ...) {
+    if (use_expm(par)) obj_expm$report(par, ...) else report_eigen(par, ...)
+  }
+  obj
 }
