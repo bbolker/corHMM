@@ -254,14 +254,15 @@ eigen_degenerate <- function(Q, gap_tol = 1e-6, kappa_tol = 1e8) {
     kappa(ev$vectors, exact = TRUE) > kappa_tol
 }
 
-## pruning = "auto" (default) uses one eigendecomposition of Q per evaluation,
-## with all edges at the same tree level handled together ("eigen"), and
-## falls back to a matrix exponential per edge ("expm") where Q has repeated
-## eigenvalues: always, if they are repeated for any parameter values (e.g.
-## ER models with > 2 states); otherwise only at parameter values where they
-## (nearly) coincide, such as equal starting values. The fallback applies to
-## $fn, $gr and $report; samplers that use the tape directly (tmbstan) use
-## the eigen tape unless the degeneracy is structural.
+## pruning = "eigen" uses one eigendecomposition of Q per evaluation, with
+## all edges at the same tree level handled together; "expm" uses a matrix
+## exponential per edge. "auto" (default) uses "expm" throughout if Q has
+## repeated eigenvalues for any parameter values (e.g. ER models with > 2
+## states). Otherwise it returns an object whose tape (used directly by
+## tmbstan, sdreport, $he) is "expm", but whose $fn, $gr and $report use
+## "eigen", falling back to "expm" where eigenvalues (nearly) coincide (e.g.
+## equal starting values) or the eigen tape fails. So optimization gets the
+## speedup and HMC stays safe; pruning = "eigen" opts in for HMC as well.
 mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
                               order.test, lewis.asc.bias,
                               set.fog = FALSE, fog.vec = NULL,
@@ -674,29 +675,50 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
     if (structural) pruning <- "expm"
   }
   if (pruning == "expm") return(mk_obj("expm"))
+  if (pruning == "eigen") return(mk_obj("eigen"))
 
-  obj <- mk_obj("eigen")
-  if (pruning == "eigen") return(obj)
+  ## "auto": the returned object is built on the per-edge expm tape, so
+  ## anything that uses the tape directly (tmbstan, sdreport, $he, $env$f)
+  ## gets the safe method. Only $fn, $gr and $report use the faster eigen
+  ## tape, falling back to expm where Q is (nearly) degenerate or where the
+  ## eigen tape fails. RTMB's eigen atomic normalizes eigenvectors by
+  ## sqrt(v^T v), which is ~0 for some complex eigenvectors (e.g. when a
+  ## cycle of transitions dominates Q); its reverse pass then calls solve()
+  ## on a nearly singular matrix and throws an R error, which aborts a Stan
+  ## chain rather than rejecting the proposal.
+  obj <- mk_obj("expm")
+  obj_eigen <- mk_obj("eigen")
+  fn_expm <- obj$fn
+  gr_expm <- obj$gr
+  report_expm <- obj$report
+  env <- obj$env
 
-  ## "auto": use a per-edge expm tape (built on first use) at parameter
-  ## values where the eigendecomposition is degenerate
-  obj_expm <- NULL
-  use_expm <- function(par) {
-    if (!eigen_degenerate(Q_at(par))) return(FALSE)
-    if (is.null(obj_expm)) obj_expm <<- mk_obj("expm")
-    TRUE
+  ## evaluate with the eigen tape unless Q is degenerate there or the
+  ## result is an error or non-finite; otherwise use the expm tape
+  eval_safe <- function(f_eigen, f_expm, x, check_finite = TRUE, ...) {
+    if (eigen_degenerate(Q_at(x))) return(f_expm(x, ...))
+    ans <- tryCatch(f_eigen(x, ...), error = function(e) NULL)
+    if (is.null(ans) || (check_finite && any(!is.finite(ans)))) {
+      ans <- f_expm(x, ...)
+    }
+    ans
   }
-  fn_eigen <- obj$fn
-  gr_eigen <- obj$gr
-  report_eigen <- obj$report
+
   obj$fn <- function(x = obj$par, ...) {
-    if (use_expm(x)) obj_expm$fn(x, ...) else fn_eigen(x, ...)
+    ans <- eval_safe(obj_eigen$fn, fn_expm, x, ...)
+    ## keep the returned object's bookkeeping (as its own $fn would)
+    env$last.par <- x
+    if (is.finite(ans) && ans < env$value.best) {
+      env$last.par.best <- x
+      env$value.best <- ans
+    }
+    ans
   }
   obj$gr <- function(x = obj$par, ...) {
-    if (use_expm(x)) obj_expm$gr(x, ...) else gr_eigen(x, ...)
+    eval_safe(obj_eigen$gr, gr_expm, x, ...)
   }
-  obj$report <- function(par = obj$env$last.par, ...) {
-    if (use_expm(par)) obj_expm$report(par, ...) else report_eigen(par, ...)
+  obj$report <- function(par = env$last.par, ...) {
+    eval_safe(obj_eigen$report, report_expm, par, check_finite = FALSE, ...)
   }
   obj
 }
