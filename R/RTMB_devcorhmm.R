@@ -254,6 +254,24 @@ eigen_degenerate <- function(Q, gap_tol = 1e-6, kappa_tol = 1e8) {
     kappa(ev$vectors, exact = TRUE) > kappa_tol
 }
 
+## settings for the RTMB back end of corHMM() (argument RTMB_control):
+## user-supplied values override the defaults; unknown names are an error
+corHMM_RTMB_control <- function(control = list()) {
+  defaults <- list(pruning = "auto")
+  if (is.null(control)) control <- list()
+  if (!is.list(control)) stop("`RTMB_control` must be a list.", call. = FALSE)
+  bad <- setdiff(names(control), names(defaults))
+  if (length(bad) || (length(control) && is.null(names(control)))) {
+    stop("unknown `RTMB_control` element(s): ",
+         paste(if (length(bad)) bad else "(unnamed)", collapse = ", "),
+         "; valid names: ", paste(names(defaults), collapse = ", "),
+         call. = FALSE)
+  }
+  control <- utils::modifyList(defaults, control)
+  control$pruning <- match.arg(control$pruning, c("auto", "eigen", "expm"))
+  control
+}
+
 ## pruning = "eigen" uses one eigendecomposition of Q per evaluation, with
 ## all edges at the same tree level handled together; "expm" uses a matrix
 ## exponential per edge. "auto" (default) uses "expm" throughout if Q has

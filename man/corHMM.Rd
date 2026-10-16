@@ -8,7 +8,7 @@ node.states = "marginal", fixed.nodes=FALSE, p=NULL, root.p="yang",
 tip.fog=NULL, ip=NULL, fog.ip=0.01, nstarts=0, n.cores=1, 
 get.tip.states = FALSE, lewis.asc.bias = FALSE, collapse = TRUE, 
 lower.bound = 1e-9, upper.bound = 100, opts=NULL, return.devfun = FALSE, use_RTMB = FALSE,
-prior = NULL, mcmc = NULL, verbose=TRUE)
+prior = NULL, mcmc = NULL, RTMB_control = list(), verbose=TRUE)
 }
 \arguments{
 \item{phy}{a phylogenetic tree, in \code{ape} \dQuote{phylo} format.}
@@ -30,11 +30,12 @@ prior = NULL, mcmc = NULL, verbose=TRUE)
 \item{collapse}{a boolean indicating whether to collapse multiple character combinations into only the observed states. For example, if true a two character dataset contained (0,0), (1,0), and (1,1), this would be collapsed into 1,2,3. However, if set to false it would 1,2,4. In combination with a custom rate matrix this allows for the estimation of transitions between the unobserved character combination. The default is \code{TRUE}}.
 \item{lower.bound}{lower bound for the likelihood search. The default is \code{lower.bound=1e-9}.}
 \item{upper.bound}{upper bound for the likelihood search. The default is \code{upper.bound=100}.}
-\item{opts}{options to pass to nloptr. default is \code{NULL}.}
+\item{opts}{list of control options passed to \code{\link{nlminb}} (its \code{control} argument). The default, \code{NULL}, uses \code{list(eval.max=1e6, iter.max=1e6, rel.tol=sqrt(.Machine$double.eps))}; a supplied list replaces these defaults.}
 \item{return.devfun}{return deviance function?}
 \item{use_RTMB}{use RTMB for optimization?}
 \item{prior}{an optional list specifying Normal priors on the log-scale parameters; requires \code{use_RTMB = TRUE} (or a formula model). When supplied, \code{corHMM} maximizes the log-posterior rather than the log-likelihood. Elements (all optional): \code{lb}, \code{ub} (lower and upper ends of the plausible range of log-rates; default \code{log(lower.bound)} and \code{log(upper.bound)}); \code{range} (the half-width of \code{[lb, ub]} in prior standard deviations, so the prior is Normal with mean \code{(lb+ub)/2} and SD \code{(ub-lb)/(2*range)}; default 3); \code{coef.sd} (SD of the zero-mean Normal prior on non-intercept coefficients of formula models; default 2); \code{target} (\code{"rates"}, the default, puts the prior on log-rates; \code{"coefficients"}, for formula models only, puts it on the model coefficients). Use \code{prior = list()} for all defaults.}
 \item{mcmc}{an optional list of settings for Hamiltonian Monte Carlo sampling of the posterior with \code{tmbstan::tmbstan} (see \code{\link{mcmcControl}}); requires \code{prior} and the \code{tmbstan} package. Unless \code{init} is given, chains start at the posterior mode; for models with a single parameter, \code{init} is ignored (with a warning) and chains start at random values.}
+\item{RTMB_control}{list of settings for the RTMB back end (\code{use_RTMB = TRUE}); unspecified elements take their defaults. \code{pruning} chooses how transition probabilities are computed in the pruning algorithm: \code{"expm"} computes a matrix exponential for each branch; \code{"eigen"} uses one eigendecomposition of the rate matrix per likelihood evaluation, processing all branches at the same tree level together (much faster for large trees); \code{"auto"} (the default) uses \code{"eigen"} for the objective function and gradient seen by the optimizer, falling back to \code{"expm"} where the rate matrix has (nearly) repeated eigenvalues or the eigendecomposition fails, and gives samplers that use the AD tape directly (e.g. \code{tmbstan}) the \code{"expm"} version. Derivatives through the eigendecomposition are unreliable at repeated eigenvalues, so \code{"eigen"} is safest with a version of RTMB that returns \code{NaN} there rather than an error.}
 \item{verbose}{a boolean indicating whether to print progress to screen. default is \code{TRUE}}
 }
 \details{

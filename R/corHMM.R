@@ -15,9 +15,11 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD",
                    lewis.asc.bias = FALSE, collapse=TRUE,
                    lower.bound = 1e-9, upper.bound = 100, opts=NULL,
                    return.devfun = FALSE, use_RTMB = FALSE,
-                   prior = NULL, mcmc = NULL, verbose=TRUE) {
+                   prior = NULL, mcmc = NULL, RTMB_control = list(),
+                   verbose=TRUE) {
 
     call <- match.call()
+    RTMB_control <- corHMM_RTMB_control(RTMB_control)
 
     input_rate_mat_states <- NULL
     if(!is.null(rate.mat)) input_rate_mat_states <- colnames(rate.mat)
@@ -298,7 +300,8 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD",
             set.fog=set.fog,
             fog.vec=model.set.final$fog.vec,
             q_prep=q_prep,
-            prior=prior
+            prior=prior,
+            pruning=RTMB_control$pruning
         )
     }
 
