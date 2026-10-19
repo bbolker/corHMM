@@ -5,6 +5,7 @@
 	* priors should ideally work with both base-corHMM and RTMB-corHMM, but it's OK if they only work with RTMB
 	* `nlminb` should *only be called once*: don't duplicate any code you don't have to
 	* HMC code can only work with RTMB backend (but should be able to work with or without formula interface)
+* extend the formula interface to multi-state (>2) traits. Currently binary-only: `corHMM()` hard-codes `translate(nstate = 2L)` and rejects values other than 0/1/NA; `translate()` uses one `nstate` for all traits and codes states as `0:(nstate-1)`; transitions are grouped by trait and gain/loss direction only (so 0->1, 1->2, 0->2 would share a rate; `symm()` assumes one gain + one loss); predictor traits enter `model.matrix()` as numeric, not factors. Needs per-trait `nstate`, a decision on multistate parameterization (ordered/adjacent-only up/down formulas? per-pair formulas?), and factor predictors. Then drop/modify the "formula traits must be binary" test in `test-formula-missing.R`.
 * irreversible model + `root.p = "yang"` + `use_RTMB = TRUE` fails in `nlminb` with "NA/NaN gradient evaluation" (e.g. `primates[[2]][, 1:2]`, `getStateMat4Dat()` rate matrix with `rm[2,1] <- 0`). Probably the stationary distribution putting zero weight on the non-absorbing state (log(0) in the gradient)? Not yet checked whether this predates the merge of 03a9323.
 
 
