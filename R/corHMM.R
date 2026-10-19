@@ -120,21 +120,40 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD",
 
         q_prep <- translate(formula_list, nstate=2L)
         trait_data <- data[, q_prep$trait_names, drop=FALSE]
-        trait_data[] <- lapply(trait_data, function(x) as.integer(as.character(x)))
+        ## missing values (NA or "?") are unknown: the tip can be in any
+        ## joint state compatible with its observed traits
+        trait_data[] <- lapply(trait_data, function(x) {
+            x <- as.character(x)
+            x[x %in% "?"] <- NA
+            suppressWarnings(as.integer(x))
+        })
 
-        if(!all(unlist(trait_data, use.names=FALSE) %in% 0:1)){
-            stop("formula traits must be complete binary variables coded 0/1.", call. = FALSE)
+        if(!all(unlist(trait_data, use.names=FALSE) %in% c(0:1, NA))){
+            stop("formula traits must be binary variables coded 0/1 (NA or \"?\" for missing).",
+                 call. = FALSE)
+        }
+        if(any(rowSums(!is.na(trait_data)) == 0)){
+            warning("some tips have no observed traits.", call. = FALSE)
         }
 
-        trait_values <- unname(match(
-            do.call(paste, c(trait_data, sep="|")),
+        complete <- stats::complete.cases(trait_data)
+        trait_values <- rep(NA_integer_, nrow(trait_data))
+        trait_values[complete] <- unname(match(
+            do.call(paste, c(trait_data[complete, , drop=FALSE], sep="|")),
             q_prep$traitMatrix$label
         ))
 
         nb.tip <- ape::Ntip(phy)
         nb.node <- ape::Nnode(phy)
         liks <- matrix(0, nb.tip + nb.node, nrow(q_prep$traitMatrix))
-        liks[cbind(seq_len(nb.tip), trait_values)] <- 1
+        state_traits <- as.matrix(q_prep$traitMatrix[, q_prep$trait_names, drop=FALSE])
+        for(i in seq_len(nb.tip)){
+            obs <- unlist(trait_data[i, ])
+            known <- !is.na(obs)
+            compatible <- rowSums(state_traits[, known, drop=FALSE] !=
+                                  rep(obs[known], each=nrow(state_traits))) == 0
+            liks[i, compatible] <- 1
+        }
 
         model.set.final <- list(
             np=q_prep$n_par,
@@ -146,6 +165,7 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD",
         )
 
         StateNames <- q_prep$traitMatrix$label
+        ## (counts of tips with complete data only)
         counts <- table(factor(trait_values, levels=seq_along(StateNames)))
         data.legend <- data
         lower <- rep(lb, model.set.final$np)
