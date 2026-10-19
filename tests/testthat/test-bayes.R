@@ -66,7 +66,7 @@ test_that("formula priors are included in the RTMB objective", {
     T2 ~ 1
   )
 
-  q_prep <- translate(
+  q_prep <- corHMM:::translate(
     formula_list = model,
     nstate = 2
   )
