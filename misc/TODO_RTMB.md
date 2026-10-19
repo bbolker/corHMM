@@ -5,6 +5,7 @@
 	* priors should ideally work with both base-corHMM and RTMB-corHMM, but it's OK if they only work with RTMB
 	* `nlminb` should *only be called once*: don't duplicate any code you don't have to
 	* HMC code can only work with RTMB backend (but should be able to work with or without formula interface)
+* irreversible model + `root.p = "yang"` + `use_RTMB = TRUE` fails in `nlminb` with "NA/NaN gradient evaluation" (e.g. `primates[[2]][, 1:2]`, `getStateMat4Dat()` rate matrix with `rm[2,1] <- 0`). Probably the stationary distribution putting zero weight on the non-absorbing state (log(0) in the gradient)? Not yet checked whether this predates the merge of 03a9323.
 
 
 ## old (porting formulas etc to corHMM)
