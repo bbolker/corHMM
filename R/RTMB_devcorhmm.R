@@ -373,17 +373,39 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
   prior_on_rates <- FALSE
   prior_on_coefficients <- FALSE
   prior.mean <- prior.sd <- coef.sd <- 0
-  intercept_idx <- slope_idx <- integer(0)
+  intercept_idx <- slope_idx <- prior_rate_idx <- integer(0)
+  prior_spec <- NULL
+  prior_logdet <- 0
 
   if (has_prior) {
-    prior.mean <- (prior$lb + prior$ub) / 2
-    prior.sd <- (prior$ub - prior$lb) / (2 * prior$range)
-    coef.sd <- prior$coef.sd
+    if (is.null(prior$family)) prior$family <- "lognormal"
+    prior_spec <- prior_setup(prior)
+    if (prior$family == "lognormal") {
+      prior.mean <- prior_spec$mean
+      prior.sd <- prior_spec$sd
+      coef.sd <- prior$coef.sd
+    }
 
     if (formula_interface) {
       prior_on_rates <- identical(prior$target, "rates")
       prior_on_coefficients <- identical(prior$target, "coefficients")
 
+      if (prior_on_rates) {
+        ## one prior term per distinct rate, as for the free rates of a
+        ## native model: rate_X has a row for every allowed transition, and
+        ## transitions that share a rate (e.g. an intercept-only trait) have
+        ## identical rows
+        rate_X <- as.matrix(q_prep$rate_X)
+        prior_rate_idx <- which(!duplicated(round(rate_X, 12)))
+        X_u <- rate_X[prior_rate_idx, , drop = FALSE]
+        ## when the coefficients map one-to-one onto the distinct log-rates,
+        ## the prior density of the coefficients includes |det X_u|, so the
+        ## log posterior equals that of the equivalent native model
+        if (nrow(X_u) == ncol(X_u)) {
+          ld <- determinant(X_u, logarithm = TRUE)$modulus
+          if (is.finite(ld)) prior_logdet <- as.numeric(ld)
+        }
+      }
       if (prior_on_coefficients) {
         intercept_idx <- grep(":\\(Intercept\\)$", q_prep$par_names)
         slope_idx <- setdiff(seq_along(q_prep$par_names), intercept_idx)
@@ -674,11 +696,8 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
 
     if (has_prior) {
       if (formula_interface && prior_on_rates) {
-        x <- eta_rates
-        prior_nll <- prior_nll + sum(
-          0.5 * log(2 * pi * prior.sd^2) +
-            0.5 * ((x - prior.mean) / prior.sd)^2
-        )
+        prior_nll <- prior_nll +
+          prior_nll_rates(eta_rates[prior_rate_idx], prior_spec) - prior_logdet
       } else if (formula_interface && prior_on_coefficients) {
         if (length(intercept_idx) > 0) {
           x <- p_model[intercept_idx]
@@ -696,10 +715,7 @@ mkdev.corhmm_rtmb <- function(p, phy, liks, Q, rate, root.p, rate.cat,
           )
         }
       } else {
-        prior_nll <- prior_nll + sum(
-          0.5 * log(2 * pi * prior.sd^2) +
-            0.5 * ((p_model - prior.mean) / prior.sd)^2
-        )
+        prior_nll <- prior_nll + prior_nll_rates(p_model, prior_spec)
       }
     }
 

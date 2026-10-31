@@ -8,8 +8,23 @@
       \item Fixed mislabeled \code{mapped.edge} columns in \code{makeSimmap}.
     }
   }
+  \subsection{USER-VISIBLE CHANGES}{
+    \itemize{
+      \item With formula models and \code{prior$target = "rates"}, the prior
+  now applies once to each distinct rate rather than once to each allowed
+  transition, so a rate shared by several transitions (e.g. of a trait with an
+  intercept-only formula) is no longer penalized several times. Formula models
+  and their native equivalents now have the same posterior; results of earlier
+  formula fits with priors change.
+    }
+  }
   \subsection{NEW FEATURES}{
     \itemize{
+      \item New rate priors (\code{prior$family}): gamma, exponential and
+  uniform priors on the rate scale, and gamma and exponential priors with
+  uniform hyperpriors, matching BayesTraits' \code{PriorAll} and
+  \code{HyperPriorAll} options. Hyperparameters are integrated out
+  numerically.
       \item \code{makeSimmap(model = fit)} accepts \code{corhmm} fits,
   preserving state coding across versions, including 2.8.
       \item Added optional \code{method = "uniformization"} sampling to \code{makeSimmap}.

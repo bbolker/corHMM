@@ -75,16 +75,7 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD",
     }
 
     if(!is.null(prior)){
-        if(is.null(prior$lb)) prior$lb <- log(lower.bound)
-        if(is.null(prior$ub)) prior$ub <- log(upper.bound)
-        if(is.null(prior$range)) prior$range <- 3
-        if(is.null(prior$coef.sd)) prior$coef.sd <- 2
-        if(is.null(prior$target)) prior$target <- "rates"
-        prior$target <- match.arg(prior$target, c("rates", "coefficients"))
-
-        if(!model_is_formula && prior$target != "rates"){
-            stop("`prior$target = 'coefficients'` is only available for formula models.", call. = FALSE)
-        }
+        prior <- check_prior(prior, lower.bound, upper.bound, model_is_formula)
     }
 
     lb <- log(lower.bound)
@@ -266,6 +257,15 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD",
 
         lower <- rep(lb, model.set.final$np)
         upper <- rep(ub, model.set.final$np)
+        ## a uniform prior's limits on native log-rates become box bounds
+        if(!is.null(prior) && prior$family == "uniform"){
+            upper <- pmin(upper, log(prior$max))
+            if(prior$min > 0) lower <- pmax(lower, log(prior$min))
+            if(any(lower >= upper)){
+                stop("the uniform prior's range does not overlap [lower.bound, upper.bound].",
+                     call. = FALSE)
+            }
+        }
 
         if(!is.null(tip.fog)){
             if(sum(tip.fog) < 1){
@@ -404,7 +404,7 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD",
                 start[start < exp(lb)] <- exp(lb)
                 start[start > exp(ub)] <- exp(lb)
                 if(set.fog) start <- c(rep(fog.ip, n.fog), start)
-                start <- log(start)
+                start <- pmin(pmax(log(start), lower), upper)
             }
 
             if(use_RTMB) names(start) <- names(RTMB_obj$par)
@@ -485,6 +485,22 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD",
             mcmc$init <- NULL
         } else if(is.null(mcmc$init)){
             mcmc$init <- rep(list(unname(out$par)), mcmc$chains)
+        }
+
+        ## native models with a uniform prior: sample within its limits using
+        ## Stan's bounded transform. Stan needs inits strictly inside the
+        ## bounds, and the posterior mode is often at the upper limit.
+        if(!model_is_formula && prior$family == "uniform" &&
+           is.null(mcmc$lower) && is.null(mcmc$upper)){
+            n_rates <- model.set.final$np
+            mcmc$lower <- c(rep(-Inf, n.fog),
+                            rep(if(prior$min > 0) log(prior$min) else -Inf, n_rates))
+            mcmc$upper <- c(rep(Inf, n.fog), rep(log(prior$max), n_rates))
+            if(!is.null(mcmc$init)){
+                eps <- 1e-3
+                mcmc$init <- lapply(mcmc$init, function(x)
+                    pmin(pmax(x, mcmc$lower + eps), mcmc$upper - eps))
+            }
         }
 
         ## settings left unspecified must be omitted, not passed as NULL:
