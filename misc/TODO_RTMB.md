@@ -11,12 +11,11 @@
 
 ## old (porting formulas etc to corHMM)
 
-* port `formula_interface.R` code to corHMM
-* test `sym()` syntax (there are still `browser()` calls in the code!)
+* test `sym()` syntax
 * ? allow `..rateclass` (or whatever) in formulas
 * reverse-mapping functions? (i.e. going from Q parameters to beta, we can do this by inverting the X matrices with `solve()`) 
    * i.e. `Q = X %*% beta` → `beta = Xinv %*% Q`
-* priors
+   * `mkdev.corhmm_rtmb()` already finds the distinct rows of `rate_X` (`X_u`) for the priors; when `X_u` is square, `beta = solve(X_u, log_rates)`
 * check benchmarking results: why are additive models doing better (BMB) ?
 
 ## old 
@@ -45,7 +44,4 @@
 ## miscellaneous
 
 * `quiet` option
-* return devfun etc etc.? (see main branch of BMB fork)
-* priors? (tricky, they have to be built into the likelihood)
 * construct contrasts?
-* try HMC/`tmbstan` ... [tried it, it's slow without priors!]
