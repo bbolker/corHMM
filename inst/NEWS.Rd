@@ -16,6 +16,10 @@
   intercept-only formula) is no longer penalized several times. Formula models
   and their native equivalents now have the same posterior; results of earlier
   formula fits with priors change.
+      \item \code{corHMM()}'s \code{RTMB_control} argument is now
+  \code{RTMB.control}, and \code{mcmcControl()} is now \code{mcmc.control()}.
+      \item HMC for native models now samples within the optimization bounds
+  by default (\code{mcmc.control(use.bounds = TRUE)}).
     }
   }
   \subsection{NEW FEATURES}{

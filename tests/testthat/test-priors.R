@@ -163,3 +163,27 @@ test_that("HMC recovers rate-scale priors when the data are uninformative", {
                tolerance = 5, scale = 1)
   expect_equal(sum(rstan::get_divergent_iterations(fit_n$mcmc)), 0)
 })
+
+
+test_that("use.bounds keeps native HMC within the optimization bounds", {
+  skip_on_cran()
+  skip_if_not_installed("tmbstan")
+  skip_if(.Platform$OS.type == "windows")
+  set.seed(20261031)
+  phy <- ape::rtree(8)
+  dat_n <- data.frame(sp = phy$tip.label, T1 = rep("0&1", 8))
+  rm <- matrix(c(NA, 2, 1, NA), 2, dimnames = list(c("0", "1"), c("0", "1")))
+  fit <- function(...) {
+    suppressWarnings(
+      corHMM(phy, dat_n, rate.cat = 1, rate.mat = rm, node.states = "none",
+             root.p = c(0.5, 0.5), use_RTMB = TRUE, verbose = FALSE, collapse = FALSE,
+             upper.bound = 5, prior = list(family = "exponential", mean = 10),
+             mcmc = list(chains = 1, iter = 1000, seed = 1031, refresh = 0,
+                         open_progress = FALSE, ...)))
+  }
+  ## posterior = prior (Exp(mean 10)), so P(rate > 5) is about 0.6 without bounds
+  r_bounded <- exp(as.matrix(fit()$mcmc)[, 1:2])
+  r_free <- exp(as.matrix(fit(use.bounds = FALSE)$mcmc)[, 1:2])
+  expect_true(all(r_bounded <= 5))
+  expect_gt(mean(r_free > 5), 0.3)
+})

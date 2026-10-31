@@ -36,19 +36,19 @@ test_that("base and RTMB share one nlminb path", {
 })
 
 
-test_that("mcmcControl supplies and updates chains and iterations", {
-  default <- mcmcControl()
+test_that("mcmc.control supplies and updates chains and iterations", {
+  default <- mcmc.control()
 
-  expect_identical(default, list(chains = 4, iter = 2000))
+  expect_identical(default, list(chains = 4, iter = 2000, use.bounds = TRUE))
 
-  control <- mcmcControl(chains = 2, iter = 80)
+  control <- mcmc.control(chains = 2, iter = 80)
 
-  expect_identical(control, list(chains = 2, iter = 80))
+  expect_identical(control, list(chains = 2, iter = 80, use.bounds = TRUE))
 
   control$chains <- 1
   control$iter <- 40
 
-  expect_identical(control, list(chains = 1, iter = 40))
+  expect_identical(control, list(chains = 1, iter = 40, use.bounds = TRUE))
 })
 
 
@@ -168,7 +168,7 @@ test_that("priors still produce classic and formula MAP fits", {
 })
 
 
-test_that("mcmcControl runs classic, formula, and multiple-chain HMC", {
+test_that("mcmc.control runs classic, formula, and multiple-chain HMC", {
   skip_on_cran()
   skip_if_not_installed("RTMB")
   skip_if_not_installed("tmbstan")
@@ -182,13 +182,13 @@ test_that("mcmcControl runs classic, formula, and multiple-chain HMC", {
   )
   prior <- list(range = 3, coef.sd = 2)
 
-  classic_control <- mcmcControl(
+  classic_control <- mcmc.control(
     chains = 1,
     iter = 40,
     refresh = 0
   )
 
-  formula_control <- mcmcControl(
+  formula_control <- mcmc.control(
     chains = 2,
     iter = 40,
     refresh = 0

@@ -15,11 +15,11 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD",
                    lewis.asc.bias = FALSE, collapse=TRUE,
                    lower.bound = 1e-9, upper.bound = 100, opts=NULL,
                    return.devfun = FALSE, use_RTMB = FALSE,
-                   prior = NULL, mcmc = NULL, RTMB_control = list(),
+                   prior = NULL, mcmc = NULL, RTMB.control = list(),
                    verbose=TRUE) {
 
     call <- match.call()
-    RTMB_control <- corHMM_RTMB_control(RTMB_control)
+    RTMB.control <- corHMM_RTMB_control(RTMB.control)
 
     input_rate_mat_states <- NULL
     if(!is.null(rate.mat)) input_rate_mat_states <- colnames(rate.mat)
@@ -321,7 +321,7 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD",
             fog.vec=model.set.final$fog.vec,
             q_prep=q_prep,
             prior=prior,
-            pruning=RTMB_control$pruning
+            pruning=RTMB.control$pruning
         )
     }
 
@@ -472,7 +472,7 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD",
         if(!requireNamespace("tmbstan", quietly = TRUE)){
             stop("HMC requires the `tmbstan` package.", call. = FALSE)
         }
-        mcmc <- do.call(mcmcControl, mcmc)
+        mcmc <- do.call(mcmc.control, mcmc)
 
         ## start chains at the posterior mode, except for one-parameter
         ## models: tmbstan passes a length-1 init as a scalar where Stan
@@ -487,20 +487,27 @@ corHMM <- function(phy, data, rate.cat, rate.mat=NULL, model = "ARD",
             mcmc$init <- rep(list(unname(out$par)), mcmc$chains)
         }
 
-        ## native models with a uniform prior: sample within its limits using
-        ## Stan's bounded transform. Stan needs inits strictly inside the
-        ## bounds, and the posterior mode is often at the upper limit.
-        if(!model_is_formula && prior$family == "uniform" &&
+        ## native models: sample within the optimizer's bounds (including a
+        ## uniform prior's limits) using Stan's bounded transform. Formula
+        ## models' bounds are on coefficients, including contrasts, where
+        ## they would truncate the posterior arbitrarily, so they are not used.
+        ## Stan needs inits strictly inside the bounds, and the posterior mode
+        ## can be at a bound.
+        use.bounds <- isTRUE(mcmc$use.bounds)
+        mcmc$use.bounds <- NULL
+        if(!model_is_formula && use.bounds &&
            is.null(mcmc$lower) && is.null(mcmc$upper)){
-            n_rates <- model.set.final$np
-            mcmc$lower <- c(rep(-Inf, n.fog),
-                            rep(if(prior$min > 0) log(prior$min) else -Inf, n_rates))
-            mcmc$upper <- c(rep(Inf, n.fog), rep(log(prior$max), n_rates))
+            mcmc$lower <- lower
+            mcmc$upper <- upper
             if(!is.null(mcmc$init)){
                 eps <- 1e-3
                 mcmc$init <- lapply(mcmc$init, function(x)
-                    pmin(pmax(x, mcmc$lower + eps), mcmc$upper - eps))
+                    pmin(pmax(x, lower + eps), upper - eps))
             }
+        }
+        if(!model_is_formula && !use.bounds && prior$family == "uniform"){
+            warning("HMC with a uniform prior but `use.bounds = FALSE` samples ",
+                    "against a hard limit and is unreliable.", call. = FALSE)
         }
 
         ## settings left unspecified must be omitted, not passed as NULL:
