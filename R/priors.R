@@ -8,7 +8,7 @@
 ## samples and whose mode corHMM reports.
 
 prior_families <- c("lognormal", "gamma", "exponential", "uniform",
-                     "hyper_gamma", "hyper_exp")
+                     "hyper_gamma", "hyper_exp", "horseshoe")
 
 ## fill in defaults and check a user-supplied `prior` list (see ?corHMM)
 check_prior <- function(prior, lower.bound, upper.bound, model_is_formula) {
@@ -73,7 +73,23 @@ check_prior <- function(prior, lower.bound, upper.bound, model_is_formula) {
                }
            },
            hyper_gamma = { need_range("shape"); need_range("scale") },
-           hyper_exp = need_range("mean"))
+           hyper_exp = need_range("mean"),
+           horseshoe = {
+               need("scale_global", 1)
+               if (is.null(prior$slab_scale)) prior$slab_scale <- Inf
+               if (!is.numeric(prior$slab_scale) || length(prior$slab_scale) != 1 ||
+                   is.na(prior$slab_scale) || prior$slab_scale <= 0) {
+                   stop("`prior$slab_scale` must be a positive number (or Inf) ",
+                        "for family \"horseshoe\".", call. = FALSE)
+               }
+               if (is.null(prior$fix_global)) prior$fix_global <- FALSE
+               if (!isTRUE(prior$fix_global) && !isFALSE(prior$fix_global)) {
+                   stop("`prior$fix_global` must be TRUE or FALSE.", call. = FALSE)
+               }
+               ## the marginal over the global scale is tabulated over the
+               ## range of rates that the optimizer and HMC can reach
+               prior$rate_bounds <- c(lower.bound, upper.bound)
+           })
     prior
 }
 
@@ -109,6 +125,9 @@ prior_setup <- function(prior) {
                ps$log_b <- log(hscale)
                ps$log_norm <- log(diff(hscale)) +
                    if (is.null(hpar)) 0 else log(diff(hpar))
+           },
+           horseshoe = {
+               ps <- c(ps, horseshoe_setup(prior))
            })
     ps
 }
@@ -147,7 +166,102 @@ prior_nll_rates <- function(x, ps) {
                    lp <- RTMB::logspace_sub(lp, ps$logH(x - ps$log_b[1]))
                }
                n * ps$log_norm - sum(lp) - sum(x)
+           },
+           horseshoe = {
+               ## log of sum_k w_k prod_i p(q_i | tau_k) over the nodes of
+               ## the global scale (one node, weight 1, if it is fixed)
+               terms <- lapply(seq_along(ps$log_tau), function(k) {
+                   g <- ps$log_g[[min(k, length(ps$log_g))]]
+                   ps$log_w[k] + sum(g(x - ps$log_tau[k])) - n * ps$log_tau[k]
+               })
+               -Reduce(RTMB::logspace_add, terms) - sum(x)
            })
+}
+
+## Horseshoe prior on the rates (Carvalho et al. 2010), optionally
+## regularized with a slab (Piironen & Vehtari 2017):
+##   q_i ~ N+(0, s_i^2),  s_i^2 = c^2 tau^2 lambda_i^2 / (c^2 + tau^2 lambda_i^2),
+##   lambda_i ~ C+(0, 1),  tau ~ C+(0, scale_global) (or tau = scale_global),
+## with slab scale c (Inf: the plain horseshoe, s_i = tau lambda_i).
+## Given tau, p(q | tau) = g(q / tau; c / tau) / tau, where g(u; r) is the
+## density of u with tau = 1 and slab scale r. log g is tabulated as a
+## function of log u by quadrature over log lambda and interpolated by an
+## AD-safe spline: one table for the plain horseshoe, one per node of tau
+## with a slab. A shared tau is integrated out by Gauss-Legendre quadrature
+## over log tau, so the rates' prior is their exact joint marginal (up to
+## quadrature error) and no hyperparameters are estimated. The log tau nodes
+## cover the reachable rates (rate_bounds, from lower.bound and upper.bound)
+## widened by 3 units, and scale_global +/- 8 units; the C+ density is
+## renormalized over that range.
+horseshoe_setup <- function(prior) {
+    lb <- log(if (is.null(prior$rate_bounds)) c(1e-9, 100) else prior$rate_bounds)
+    tab <- horseshoe_tables(lb, log(prior$scale_global),
+                            log(if (is.null(prior$slab_scale)) Inf else prior$slab_scale),
+                            isTRUE(prior$fix_global))
+    list(log_tau = tab$log_tau, log_w = tab$log_w,
+         log_g = lapply(tab$tables, function(t) RTMB::splinefun(t$v, t$log_g, method = "natural")))
+}
+
+## nodes and weights of log tau, and the tables of log g (v, log_g) for
+## horseshoe_setup(); memoised, since tables with a slab take seconds
+horseshoe_tables <- local({
+    cache <- new.env(parent = emptyenv())
+    function(lb, log_tau0, log_c, fix_global) {
+        key <- paste(c(lb, log_tau0, log_c, fix_global), collapse = "_")
+        if (!is.null(cache[[key]])) return(cache[[key]])
+        if (fix_global) {
+            log_tau <- log_tau0
+            log_w <- 0
+        } else {
+            lo <- min(lb[1] - 3, log_tau0 - 8)
+            hi <- max(lb[2] + 3, log_tau0 + 8)
+            gl <- gauss_legendre_panels(seq(lo, hi, length.out = ceiling(hi - lo) + 1), 8)
+            log_tau <- gl$x
+            ## C+(0, tau0) density of log tau: (2/pi) tau tau0 / (tau0^2 + tau^2)
+            log_w <- log(gl$w) + log(2 / pi) + log_tau + log_tau0 -
+                log_add(2 * log_tau0, 2 * log_tau)
+            log_w <- log_w - log_sum_exp_cols(matrix(log_w))
+        }
+        ## each table covers log u = log q - log tau for the reachable rates,
+        ## with 5 units to spare (a natural spline extrapolates linearly)
+        tables <- if (is.finite(log_c)) {
+            lapply(log_tau, function(t) {
+                v <- seq(lb[1] - t - 5, lb[2] - t + 5, by = 0.05)
+                list(v = v, log_g = hs_log_g(v, log_c - t))
+            })
+        } else {
+            v <- seq(lb[1] - max(log_tau) - 5, lb[2] - min(log_tau) + 5, by = 0.05)
+            list(list(v = v, log_g = hs_log_g(v)))
+        }
+        res <- list(log_tau = log_tau, log_w = log_w, tables = tables)
+        cache[[key]] <- res
+        res
+    }
+})
+
+## log(exp(a) + exp(b)), elementwise (numeric)
+log_add <- function(a, b) pmax(a, b) + log1p(exp(-abs(a - b)))
+
+## log density g(u; r) of the half-horseshoe with global scale 1 and slab
+## scale r = exp(log_r) (Inf: no slab) at u = exp(v), by composite
+## Gauss-Legendre quadrature over w = log lambda. The integrand vanishes
+## (super-exponentially) for lambda below about u e^-8 and decays like
+## 1/lambda^2 (no slab) or 1/lambda (slab, once the scale reaches r) above
+## max(u, 1, r), so the range is cut off there.
+hs_log_g <- function(v, log_r = Inf) {
+    slab <- is.finite(log_r)
+    lo <- v - 8
+    hi <- pmax(v, 0, if (slab) log_r else 0) + if (slab) 40 else 18
+    gl <- gauss_legendre_panels(seq(0, 1, length.out = 33), 12)
+    ## nodes (rows) for each v (columns), mapped from [0, 1] to [lo, hi]
+    w <- outer(gl$x, hi - lo) + rep(lo, each = length(gl$x))
+    log_dw <- log(outer(gl$w, hi - lo))
+    log_sd <- if (slab) w + log_r - 0.5 * log_add(2 * log_r, 2 * w) else w
+    z2 <- exp(2 * (rep(v, each = nrow(w)) - log_sd))
+    ## 2 dnorm(u, 0, sd) * (2 / pi) / (1 + lambda^2) * lambda
+    log_f <- log(2) - 0.5 * log(2 * pi) - log_sd - z2 / 2 + log(2 / pi) + w -
+        log_add(0, 2 * w)
+    log_sum_exp_cols(log_dw + log_f)
 }
 
 ## Gauss-Legendre nodes and weights on [a, b] (Golub-Welsch)

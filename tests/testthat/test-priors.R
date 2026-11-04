@@ -65,6 +65,53 @@ test_that("hyperprior marginals match numerical integration", {
 })
 
 
+## brute-force (regularized) half-horseshoe density of u with global scale 1
+## and slab scale r, integrating over log lambda
+hs_g_bf <- function(u, r = Inf) {
+  f <- function(w) {
+    l <- exp(w)
+    s <- if (is.finite(r)) l * r / sqrt(r^2 + l^2) else l
+    2 * dnorm(u, 0, s) * (2 / pi) / (1 + l^2) * l
+  }
+  br <- sort(unique(c(log(u) - 10, log(u) + 3, if (is.finite(r)) log(r) + c(-3, 3),
+                      max(log(u), 0, if (is.finite(r)) log(r) else 0) + 60)))
+  sum(sapply(seq_len(length(br) - 1), function(i) {
+    integrate(f, br[i], br[i + 1], rel.tol = 1e-12, subdivisions = 5000)$value
+  }))
+}
+
+test_that("horseshoe densities match numerical integration", {
+  skip_on_cran()
+  v <- c(-20, -3, 0, 2)
+  for (r in c(Inf, 5)) {
+    expect_equal(corHMM:::hs_log_g(v, log(r)), log(sapply(exp(v), hs_g_bf, r = r)),
+                 tolerance = 1e-8)
+  }
+  ## fixed global scale: independent rates, p(q) = g(q / tau) / tau
+  x <- log(c(1e-5, 0.02, 3))
+  for (sl in c(Inf, 0.5)) {
+    pr <- list(family = "horseshoe", scale_global = 0.01, slab_scale = sl, fix_global = TRUE)
+    bf <- sum(log(sapply(exp(x) / 0.01, hs_g_bf, r = sl / 0.01) / 0.01) + x)
+    expect_equal(-prior_nll_at(x, pr), bf, tolerance = 1e-6)
+  }
+  ## shared global scale ~ C+(0, tau0), integrated over the tabulated range
+  ## of log tau (rate bounds 1e-9, 100, widened by 3)
+  q <- c(0.001, 0.3)
+  tau0 <- 0.01
+  lim <- c(log(1e-9) - 3, log(100) + 3)
+  f <- function(t) sapply(t, function(tt) {
+    tau <- exp(tt)
+    prod(sapply(q / tau, hs_g_bf) / tau) * (2 / pi) * tau * tau0 / (tau0^2 + tau^2)
+  })
+  br <- seq(lim[1], lim[2], length.out = 40)
+  num <- sum(sapply(1:39, function(i) integrate(f, br[i], br[i + 1], rel.tol = 1e-10)$value))
+  den <- integrate(function(t) (2 / pi) * exp(t) * tau0 / (tau0^2 + exp(2 * t)),
+                   lim[1], lim[2], rel.tol = 1e-12)$value
+  expect_equal(-prior_nll_at(log(q), list(family = "horseshoe", scale_global = tau0)) -
+                 sum(log(q)), log(num / den), tolerance = 1e-6)
+})
+
+
 test_that("priors give the same posterior with and without the formula interface", {
   set.seed(20261031)
   phy <- ape::rtree(30)
@@ -82,7 +129,9 @@ test_that("priors give the same posterior with and without the formula interface
     list(family = "gamma", shape = 1.5, scale = 2),
     list(family = "exponential", mean = 10),
     list(family = "hyper_gamma", shape = c(0, 10), scale = c(0, 10)),
-    list(family = "hyper_exp", mean = c(0, 10)))
+    list(family = "hyper_exp", mean = c(0, 10)),
+    list(family = "horseshoe", scale_global = 0.1),
+    list(family = "horseshoe", scale_global = 0.1, slab_scale = 5, fix_global = TRUE))
   for (pr in priors) {
     expect_equal(fit(model = list(T1 ~ T2, T2 ~ T1), prior = pr)$logpost,
                  fit(rate.mat = rm_full, prior = pr, collapse = FALSE)$logpost,
@@ -124,6 +173,11 @@ test_that("invalid prior specifications are rejected", {
   expect_error(fit(model = T1 ~ 1, prior = list(family = "exponential", mean = 10,
                                                 target = "coefficients")),
                "requires `prior\\$family = 'lognormal'`")
+  expect_error(fit(model = T1 ~ 1, prior = list(family = "horseshoe")),
+               "prior\\$scale_global")
+  expect_error(fit(model = T1 ~ 1, prior = list(family = "horseshoe", scale_global = 1,
+                                                slab_scale = -1)),
+               "slab_scale")
   expect_error(fit(model = T1 ~ 1, prior = list(family = "cauchy")))
 })
 
@@ -162,6 +216,21 @@ test_that("HMC recovers rate-scale priors when the data are uninformative", {
   expect_equal(unname(quantile(r[, 1], probs)), qunif(probs, 0, 100),
                tolerance = 5, scale = 1)
   expect_equal(sum(rstan::get_divergent_iterations(fit_n$mcmc)), 0)
+
+  ## native model, uninformative tips: posterior = horseshoe with a shared
+  ## global scale (truncated to [1e-9, 100])
+  fit_h <- suppressWarnings(
+    corHMM(phy, dat_n, rate.cat = 1, rate.mat = rm, node.states = "none",
+           root.p = c(0.5, 0.5), use_RTMB = TRUE, verbose = FALSE, collapse = FALSE,
+           mcmc = mc, prior = list(family = "horseshoe", scale_global = 0.1)))
+  tau <- abs(0.1 * rcauchy(n))
+  ref_h <- cbind(abs(rnorm(n, 0, tau * abs(rcauchy(n)))), abs(rnorm(n, 0, tau * abs(rcauchy(n)))))
+  keep <- rowSums(ref_h > 1e-9 & ref_h < 100) == 2
+  lr <- as.matrix(fit_h$mcmc)[, 1:2]
+  for (j in 1:2) {
+    expect_equal(unname(quantile(lr[, j], probs)), unname(quantile(log(ref_h[keep, j]), probs)),
+                 tolerance = 0.5, scale = 1)
+  }
 })
 
 
