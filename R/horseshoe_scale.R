@@ -93,3 +93,61 @@ horseshoe_prop_zero <- function(tau0, sigma, fix_global = FALSE, slab_scale = In
     b <- if (is.finite(slab_scale)) 1 / (1 + slab_scale^2 / sigma^2) else rep(0, D)
     rowMeans(1 - (1 - kappa) * rep(1 - b, each = n))
 }
+
+## Choosing the global scale from the prior alone: a rate counts as zero if
+## it is below `threshold` (by default 1/L, L the total branch length: less
+## than about one expected change on the tree), and tau0 is set so that the
+## prior probability of that is prop_zero. Under the horseshoe
+## q = s |z|, z ~ N(0, 1), with s = tau lambda (slab: s = c tau lambda /
+## sqrt(c^2 + tau^2 lambda^2)), so P(q < eps) depends on eps / tau0 (and
+## c / tau0) only, and is decreasing in tau0.
+horseshoe_scale_prior <- function(prop_zero, phy = NULL, threshold = 1 / sum(phy$edge.length),
+                                  fix_global = FALSE, slab_scale = Inf) {
+    if (!is.numeric(prop_zero) || length(prop_zero) != 1 || !(prop_zero > 0 && prop_zero < 1)) {
+        stop("`prop_zero` must be a number strictly between 0 and 1.", call. = FALSE)
+    }
+    if (missing(threshold) && is.null(phy)) {
+        stop("give `phy` (for the default threshold, 1/total branch length) or `threshold`.",
+             call. = FALSE)
+    }
+    if (!is.numeric(threshold) || length(threshold) != 1 || !(threshold > 0)) {
+        stop("`threshold` must be a positive number.", call. = FALSE)
+    }
+    f <- function(log_tau0) {
+        hs_prob_below(log(threshold) - log_tau0, log(slab_scale) - log_tau0, fix_global) - prop_zero
+    }
+    rng <- log(threshold) + c(-60, 60)
+    log_tau0 <- stats::uniroot(f, rng, tol = 1e-10)$root
+    structure(exp(log_tau0), threshold = threshold, prop_zero = prop_zero,
+              fix_global = fix_global)
+}
+
+## P(q < u) for the (regularized) half-horseshoe with tau0 = 1 and slab scale
+## r = exp(log_r), at log u: with tau fixed at 1, E_lambda[2 Phi(u / s) - 1];
+## with tau ~ C+(0, 1), that averaged over tau. Both by Gauss-Legendre
+## quadrature over log lambda (and log tau), where the half-Cauchy density
+## (2 / pi) e^w / (1 + e^(2 w)) decays like e^-|w|, so +/- 40 suffices.
+hs_prob_below <- function(log_u, log_r = Inf, fix_global = TRUE) {
+    gl <- gauss_legendre_panels(seq(-40, 40, by = 1), 10)
+    log_dens <- log(gl$w) + log(2 / pi) + gl$x - log_add(0, 2 * gl$x)
+    ## P(q < u | tau = e^t) for a vector t
+    given_tau <- function(t) {
+        vapply(t, function(tt) {
+            w <- gl$x + tt  ## log of the scale tau lambda before the slab
+            log_s <- if (is.finite(log_r)) w + log_r - 0.5 * log_add(2 * log_r, 2 * w) else w
+            sum(exp(log_dens) * (1 - 2 * stats::pnorm(-exp(log_u - log_s))))
+        }, numeric(1))
+    }
+    if (fix_global) return(given_tau(0))
+    sum(exp(log_dens) * given_tau(gl$x))
+}
+
+## Simulated prior proportion of rates below `threshold`, among n_rates rates
+## sharing the global scale (fix_global = FALSE: tau ~ C+(0, tau0) per draw)
+horseshoe_prior_zero <- function(tau0, n_rates, threshold, fix_global = FALSE,
+                                 slab_scale = Inf, n = 1e4) {
+    tau <- if (fix_global) rep(tau0, n) else abs(tau0 * stats::rcauchy(n))
+    s <- tau * matrix(abs(stats::rcauchy(n * n_rates)), n, n_rates)
+    if (is.finite(slab_scale)) s <- slab_scale * s / sqrt(slab_scale^2 + s^2)
+    rowMeans(s * abs(matrix(stats::rnorm(n * n_rates), n, n_rates)) < threshold)
+}

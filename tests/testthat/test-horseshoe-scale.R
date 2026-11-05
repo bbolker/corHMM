@@ -41,3 +41,23 @@ test_that("horseshoe_sigma() gives likelihood scales on the rate scale", {
                                       use_RTMB = TRUE, verbose = FALSE, collapse = FALSE)),
                "return.devfun")
 })
+
+test_that("horseshoe_scale_prior() gives the target prior probability of a zero rate", {
+  set.seed(20261105)
+  phy <- ape::rtree(50)
+  L <- sum(phy$edge.length)
+  for (fg in c(TRUE, FALSE)) {
+    tau0 <- horseshoe_scale_prior(0.4, phy, fix_global = fg)
+    expect_equal(attr(tau0, "threshold"), 1 / L)
+    sim <- horseshoe_prior_zero(tau0, 1, 1 / L, fix_global = fg, n = 2e5)
+    expect_equal(mean(sim), 0.4, tolerance = 0.01)
+  }
+  ## a slab only trims the upper tail, so it raises tau0 a little
+  expect_gt(c(horseshoe_scale_prior(0.4, phy, slab_scale = 5 / L)),
+            c(horseshoe_scale_prior(0.4, phy)))
+  ## the exact probability below matches direct integration
+  f <- function(l) (1 - 2 * pnorm(-0.6 / l)) * (2 / pi) / (1 + l^2)
+  bf <- integrate(f, 0, 1, rel.tol = 1e-12)$value + integrate(f, 1, Inf, rel.tol = 1e-12)$value
+  expect_equal(corHMM:::hs_prob_below(log(0.6)), bf, tolerance = 1e-8)
+  expect_error(horseshoe_scale_prior(0.4), "give `phy`")
+})
